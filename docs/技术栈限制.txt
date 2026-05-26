@@ -1,0 +1,8 @@
+框架：Flutter
+大模型框架：LangChain
+设计语言：Material Design 3
+Android SDK：D:\Software\AndroidSDK
+
+MVP专注于android版，但尽量不要使用影响跨平台的特性
+必须使用我们提供的SDK，不要安装模拟器，我们进行实机验证
+gradle等依赖管理器，注意优先使用阿里源。只有当真正出现网络问题才使用代理解决，代理地址http://localhost:7890
