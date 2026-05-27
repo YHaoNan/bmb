@@ -2,7 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
+import 'package:langchain/langchain.dart';
+import 'package:langchain_openai/langchain_openai.dart';
 
 import 'models.dart';
 import 'template_store.dart';
@@ -26,57 +27,71 @@ class AIPlanService {
       throw Exception('请先在模型配置页填写 baseUrl、modelName、apiKey');
     }
 
-    final promptTemplate = await rootBundle.loadString('assets/prompts/plan_generate_prompt.txt');
+    final promptTemplate = await rootBundle.loadString(
+      'assets/prompts/plan_generate_prompt.txt',
+    );
     final prompt = promptTemplate
         .replaceAll('{{folder_name}}', folderName)
         .replaceAll('{{template_name}}', templateName)
         .replaceAll('{{intent}}', intent);
 
-    final endpoint = baseUrl.endsWith('/') ? '${baseUrl}chat/completions' : '$baseUrl/chat/completions';
-    debugPrint('[AIPlanService] generatePlan start');
-    debugPrint('[AIPlanService] endpoint=$endpoint');
-    debugPrint('[AIPlanService] folder=$folderName template=$templateName intentLength=${intent.length}');
-    debugPrint('[AIPlanService] model=$modelName apiKeyMasked=${_maskKey(apiKey)}');
+    final cleanBaseUrl = baseUrl.endsWith('/chat/completions')
+        ? baseUrl.substring(0, baseUrl.length - '/chat/completions'.length)
+        : baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
 
-    final response = await http.post(
-      Uri.parse(endpoint),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $apiKey',
-      },
-      body: jsonEncode({
-        'model': modelName,
-        'temperature': 0.4,
-        'messages': [
-          {'role': 'system', 'content': '你是健身训练计划生成助手。只输出JSON。'},
-          {'role': 'user', 'content': prompt},
-        ],
-      }),
+    debugPrint('[AIPlanService] generatePlan start');
+    debugPrint('[AIPlanService] baseUrl=$cleanBaseUrl');
+    debugPrint(
+      '[AIPlanService] folder=$folderName template=$templateName intentLength=${intent.length}',
+    );
+    debugPrint(
+      '[AIPlanService] model=$modelName apiKeyMasked=${_maskKey(apiKey)}',
     );
 
-    debugPrint('[AIPlanService] httpStatus=${response.statusCode}');
-    debugPrint('[AIPlanService] responsePreview=${_preview(response.body, 800)}');
+    final chat = ChatOpenAI(
+      apiKey: apiKey,
+      baseUrl: cleanBaseUrl,
+      defaultOptions: ChatOpenAIOptions(model: modelName, temperature: 0.4),
+    );
 
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('模型调用失败：HTTP ${response.statusCode} ${response.body}');
+    final messages = [
+      ChatMessage.system('你是健身训练计划生成助手。只输出JSON。'),
+      ChatMessage.humanText(prompt),
+    ];
+
+    late final String content;
+    try {
+      final aiMessage = await chat.call(messages);
+      content = aiMessage.content as String;
+    } catch (e, s) {
+      debugPrint('[AIPlanService] 模型调用失败: $e');
+      debugPrint('[AIPlanService] 模型调用堆栈: $s');
+      throw Exception('模型调用失败：$e');
     }
 
-    final body = jsonDecode(response.body) as Map<String, dynamic>;
-    final content = _extractModelText(body);
-    debugPrint('[AIPlanService] extractedContentLength=${content.length}');
-    debugPrint('[AIPlanService] extractedContentPreview=${_preview(content, 400)}');
+    debugPrint('[AIPlanService] responseLength=${content.length}');
+    debugPrint('[AIPlanService] responsePreview=${_preview(content, 800)}');
+
     if (content.isEmpty) {
-      final preview = response.body.length > 300 ? '${response.body.substring(0, 300)}...' : response.body;
-      throw Exception('模型未返回内容，响应片段: $preview');
+      throw Exception('模型未返回内容');
     }
 
     final jsonText = _extractJson(content);
     debugPrint('[AIPlanService] extractedJsonLength=${jsonText.length}');
-    debugPrint('[AIPlanService] extractedJsonPreview=${_preview(jsonText, 400)}');
+    debugPrint(
+      '[AIPlanService] extractedJsonPreview=${_preview(jsonText, 400)}',
+    );
+
     final generated = jsonDecode(jsonText) as Map<String, dynamic>;
     final actionsRaw = generated['actions'] as List<dynamic>? ?? [];
     debugPrint('[AIPlanService] actionsRawCount=${actionsRaw.length}');
-    final actions = actionsRaw.map((e) => TrainingAction.fromJson(e as Map<String, dynamic>)).toList();
+
+    final actions = actionsRaw
+        .where((e) => e != null)
+        .map((e) => TrainingAction.fromJson(e as Map<String, dynamic>))
+        .toList();
     if (actions.isEmpty) {
       throw Exception('模型未生成动作数据');
     }
@@ -112,70 +127,6 @@ class AIPlanService {
     final end = trimmed.lastIndexOf('}');
     if (start >= 0 && end > start) return trimmed.substring(start, end + 1);
     throw Exception('无法解析模型返回JSON');
-  }
-
-  String _extractModelText(Map<String, dynamic> body) {
-    debugPrint('[AIPlanService] extractModelText begin keys=${body.keys.toList()}');
-    final choices = body['choices'] as List<dynamic>?;
-    if (choices != null && choices.isNotEmpty) {
-      debugPrint('[AIPlanService] extractModelText using choices branch count=${choices.length}');
-      final first = choices.first as Map<String, dynamic>? ?? {};
-      final message = first['message'] as Map<String, dynamic>?;
-      if (message != null) {
-        final content = message['content'];
-        final fromMessage = _normalizeContentValue(content);
-        debugPrint('[AIPlanService] choices.message.contentType=${content.runtimeType} length=${fromMessage.length}');
-        if (fromMessage.isNotEmpty) return fromMessage;
-      }
-      final text = first['text']?.toString() ?? '';
-      debugPrint('[AIPlanService] choices.textLength=${text.length}');
-      if (text.isNotEmpty) return text;
-    }
-
-    final output = body['output'] as List<dynamic>?;
-    if (output != null && output.isNotEmpty) {
-      debugPrint('[AIPlanService] extractModelText using output branch count=${output.length}');
-      final firstOutput = output.first as Map<String, dynamic>? ?? {};
-      final content = firstOutput['content'] as List<dynamic>?;
-      if (content != null) {
-        for (final item in content) {
-          final map = item as Map<String, dynamic>;
-          final text = map['text']?.toString() ?? '';
-          debugPrint('[AIPlanService] output.content item textLength=${text.length}');
-          if (text.isNotEmpty) return text;
-        }
-      }
-    }
-
-    debugPrint('[AIPlanService] extractModelText no usable content');
-    return '';
-  }
-
-  String _normalizeContentValue(dynamic content) {
-    if (content == null) return '';
-    if (content is String) return content;
-    if (content is List<dynamic>) {
-      final parts = <String>[];
-      for (final item in content) {
-        if (item is String) {
-          parts.add(item);
-          continue;
-        }
-        if (item is Map<String, dynamic>) {
-          final text = item['text']?.toString() ?? '';
-          if (text.isNotEmpty) {
-            parts.add(text);
-            continue;
-          }
-          final inner = item['content']?.toString() ?? '';
-          if (inner.isNotEmpty) {
-            parts.add(inner);
-          }
-        }
-      }
-      return parts.join('\n').trim();
-    }
-    return content.toString();
   }
 
   String _preview(String text, int max) {

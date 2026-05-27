@@ -1,9 +1,10 @@
-
 import 'package:flutter/material.dart';
 import 'models.dart';
 import 'template_store.dart';
 import 'ai_plan_service.dart';
 import 'model_config_page.dart';
+import 'workout_records_page.dart';
+import 'workout_page.dart';
 
 void main() {
   runApp(const BmbApp());
@@ -22,12 +23,20 @@ class BmbApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         scaffoldBackgroundColor: const Color(0xFF0B0C0E),
-        colorScheme: ColorScheme.fromSeed(seedColor: neon, brightness: Brightness.dark).copyWith(
-          primary: neon,
-          surface: carbon,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: neon,
+          brightness: Brightness.dark,
+        ).copyWith(primary: neon, surface: carbon),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
         ),
-        appBarTheme: const AppBarTheme(backgroundColor: Colors.transparent, elevation: 0),
-        cardTheme: const CardThemeData(color: Color(0xFF15181B), shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(18)))),
+        cardTheme: const CardThemeData(
+          color: Color(0xFF15181B),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(18)),
+          ),
+        ),
       ),
       home: const AppShell(),
     );
@@ -49,6 +58,7 @@ class _AppShellState extends State<AppShell> {
   Widget build(BuildContext context) {
     final pages = [
       const TemplateHomePage(),
+      WorkoutRecordsPage(store: _store),
       ModelConfigPage(store: _store),
     ];
     return Scaffold(
@@ -58,6 +68,10 @@ class _AppShellState extends State<AppShell> {
         onDestinationSelected: (v) => setState(() => _index = v),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.fitness_center), label: '模板'),
+          NavigationDestination(
+            icon: Icon(Icons.sports_gymnastics),
+            label: '运动记录',
+          ),
           NavigationDestination(icon: Icon(Icons.tune), label: '模型配置'),
         ],
       ),
@@ -92,7 +106,17 @@ class _TemplateHomePageState extends State<TemplateHomePage> {
   }
 
   Future<void> openEditor([TrainingTemplate? t]) async {
-    await Navigator.push(context, MaterialPageRoute(builder: (_) => TemplateEditorPage(store: store, initialFolders: folders, allTemplates: templates, editing: t)));
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => TemplateEditorPage(
+          store: store,
+          initialFolders: folders,
+          allTemplates: templates,
+          editing: t,
+        ),
+      ),
+    );
     reload();
   }
 
@@ -103,7 +127,16 @@ class _TemplateHomePageState extends State<TemplateHomePage> {
       builder: (_) => AlertDialog(
         title: const Text('改个更顺手的名字'),
         content: TextField(controller: c),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')), FilledButton(onPressed: () => Navigator.pop(context, c.text.trim()), child: const Text('确认'))],
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, c.text.trim()),
+            child: const Text('确认'),
+          ),
+        ],
       ),
     );
     if (v == null || v.isEmpty || folders.contains(v)) return;
@@ -123,7 +156,16 @@ class _TemplateHomePageState extends State<TemplateHomePage> {
       builder: (_) => AlertDialog(
         title: const Text('确认删除文件夹？'),
         content: Text('会删除该文件夹下的全部模板。\n$folder'),
-        actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('删除'))],
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('删除'),
+          ),
+        ],
       ),
     );
     if (ok != true) return;
@@ -152,14 +194,30 @@ class _TemplateHomePageState extends State<TemplateHomePage> {
                   Container(
                     padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(colors: [Color(0xFF1D2D0F), Color(0xFF0E1012)]),
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF1D2D0F), Color(0xFF0E1012)],
+                      ),
                       borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: const Color(0xFFB7FF00).withValues(alpha: 0.3)),
+                      border: Border.all(
+                        color: const Color(0xFFB7FF00).withValues(alpha: 0.3),
+                      ),
                     ),
                     child: Row(
                       children: [
-                        const Expanded(child: Text('把今天练什么，变成一套能坚持的模板。', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700))),
-                        FilledButton.icon(onPressed: openEditor, icon: const Icon(Icons.bolt), label: const Text('开始创建')),
+                        const Expanded(
+                          child: Text(
+                            '把今天练什么，变成一套能坚持的模板。',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        FilledButton.icon(
+                          onPressed: openEditor,
+                          icon: const Icon(Icons.bolt),
+                          label: const Text('开始创建'),
+                        ),
                       ],
                     ),
                   ),
@@ -172,18 +230,36 @@ class _TemplateHomePageState extends State<TemplateHomePage> {
                     ),
                     child: Column(
                       children: folders.map((f) {
-                        final list = templates.where((e) => e.folder == f).toList();
+                        final list = templates
+                            .where((e) => e.folder == f)
+                            .toList();
                         return Card(
                           child: ExpansionTile(
-                            tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
-                            childrenPadding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                            tilePadding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 2,
+                            ),
+                            childrenPadding: const EdgeInsets.fromLTRB(
+                              10,
+                              0,
+                              10,
+                              10,
+                            ),
                             title: Text(f),
                             subtitle: Text('${list.length} 个模板'),
                             trailing: Wrap(
                               spacing: 4,
                               children: [
-                                IconButton(onPressed: () => renameFolder(f), icon: const Icon(Icons.drive_file_rename_outline)),
-                                IconButton(onPressed: () => deleteFolder(f), icon: const Icon(Icons.delete_outline)),
+                                IconButton(
+                                  onPressed: () => renameFolder(f),
+                                  icon: const Icon(
+                                    Icons.drive_file_rename_outline,
+                                  ),
+                                ),
+                                IconButton(
+                                  onPressed: () => deleteFolder(f),
+                                  icon: const Icon(Icons.delete_outline),
+                                ),
                               ],
                             ),
                             children: list
@@ -200,20 +276,59 @@ class _TemplateHomePageState extends State<TemplateHomePage> {
                                       highlightColor: Colors.transparent,
                                       onTap: () => openEditor(t),
                                       child: Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 10,
+                                        ),
                                         child: Row(
                                           children: [
                                             Expanded(
                                               child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
                                                 children: [
-                                                  Text(t.name, style: const TextStyle(fontWeight: FontWeight.w700)),
+                                                  Text(
+                                                    t.name,
+                                                    style: const TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                    ),
+                                                  ),
                                                   const SizedBox(height: 3),
-                                                  Text('动作组 ${t.actions.length}', style: const TextStyle(fontSize: 12, color: Color(0xFFA6ABB2))),
+                                                  Text(
+                                                    '动作组 ${t.actions.length}',
+                                                    style: const TextStyle(
+                                                      fontSize: 12,
+                                                      color: Color(0xFFA6ABB2),
+                                                    ),
+                                                  ),
                                                 ],
                                               ),
                                             ),
-                                            IconButton(onPressed: () => deleteTemplate(t), icon: const Icon(Icons.delete_outline)),
+                                            IconButton(
+                                              onPressed: () {
+                                                Navigator.push(
+                                                  context,
+                                                  MaterialPageRoute(
+                                                    builder: (_) => WorkoutPage(
+                                                      template: t,
+                                                      onSaved: reload,
+                                                    ),
+                                                  ),
+                                                );
+                                              },
+                                              icon: const Icon(
+                                                Icons.play_circle_outline,
+                                                color: Color(0xFFB7FF00),
+                                              ),
+                                            ),
+                                            IconButton(
+                                              onPressed: () =>
+                                                  deleteTemplate(t),
+                                              icon: const Icon(
+                                                Icons.delete_outline,
+                                              ),
+                                            ),
                                           ],
                                         ),
                                       ),
@@ -234,7 +349,13 @@ class _TemplateHomePageState extends State<TemplateHomePage> {
 }
 
 class TemplateEditorPage extends StatefulWidget {
-  const TemplateEditorPage({super.key, required this.store, required this.initialFolders, required this.allTemplates, this.editing});
+  const TemplateEditorPage({
+    super.key,
+    required this.store,
+    required this.initialFolders,
+    required this.allTemplates,
+    this.editing,
+  });
 
   final TemplateStore store;
   final List<String> initialFolders;
@@ -251,10 +372,6 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
 
   late List<String> folders;
   late String selectedFolder;
-
-  String trainingPart = '胸背';
-  String ability = '新手';
-  String preference = '固定器械';
 
   List<TrainingAction> actions = [];
   String aiSummary = '';
@@ -282,14 +399,16 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
     super.dispose();
   }
 
-  String buildIntent() => '我想练$trainingPart，当前能力是$ability，偏好$preference。请帮我安排一套效率高、可执行的训练模板，并给出动作要领、常见错误、平替建议和整体评价。';
+  String buildIntent() => '请帮我安排一套效率高、可执行的训练模板，并给出动作要领、常见错误、平替建议和整体评价。';
 
   Future<void> loadData() async {
     if (widget.editing != null) {
       final e = widget.editing!;
       nameController.text = e.name;
       selectedFolder = e.folder;
-      actions = e.actions.map((a) => TrainingAction.fromJson(a.toJson())).toList();
+      actions = e.actions
+          .map((a) => TrainingAction.fromJson(a.toJson()))
+          .toList();
       intentController.text = e.intent;
       aiSummary = e.aiSummary;
       ready = true;
@@ -302,9 +421,6 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
       nameController.text = draft.templateName;
       intentController.text = draft.intentText;
       selectedFolder = draft.folder;
-      trainingPart = draft.trainingPart;
-      ability = draft.ability;
-      preference = draft.preference;
       actions = draft.actions;
       aiSummary = draft.aiSummary;
       if (!folders.contains(selectedFolder)) folders.add(selectedFolder);
@@ -320,22 +436,15 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
 
   Future<void> saveDraft() async {
     if (widget.editing != null) return;
-    await widget.store.saveDraft(TemplateDraft(
-      folder: selectedFolder,
-      templateName: nameController.text.trim(),
-      intentText: intentController.text,
-      actions: actions,
-      aiSummary: aiSummary,
-      trainingPart: trainingPart,
-      ability: ability,
-      preference: preference,
-    ));
-  }
-
-  void refreshIntentFromSelection() {
-    intentController.text = buildIntent();
-    saveDraft();
-    setState(() {});
+    await widget.store.saveDraft(
+      TemplateDraft(
+        folder: selectedFolder,
+        templateName: nameController.text.trim(),
+        intentText: intentController.text,
+        actions: actions,
+        aiSummary: aiSummary,
+      ),
+    );
   }
 
   Future<void> addFolder() async {
@@ -344,8 +453,20 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('新增文件夹'),
-        content: TextField(controller: c, decoration: const InputDecoration(hintText: '例如：推日 / 拉日 / 腿日')),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')), FilledButton(onPressed: () => Navigator.pop(context, c.text.trim()), child: const Text('添加'))],
+        content: TextField(
+          controller: c,
+          decoration: const InputDecoration(hintText: '例如：推日 / 拉日 / 腿日'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, c.text.trim()),
+            child: const Text('添加'),
+          ),
+        ],
       ),
     );
     if (v == null || v.isEmpty || folders.contains(v)) return;
@@ -362,12 +483,29 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('添加动作'),
-        content: TextField(controller: c, decoration: const InputDecoration(hintText: '比如：杠铃卧推')),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')), FilledButton(onPressed: () => Navigator.pop(context, c.text.trim()), child: const Text('添加'))],
+        content: TextField(
+          controller: c,
+          decoration: const InputDecoration(hintText: '比如：杠铃卧推'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, c.text.trim()),
+            child: const Text('添加'),
+          ),
+        ],
       ),
     );
     if (v == null || v.isEmpty) return;
-    actions.add(TrainingAction(groupTitle: v, cards: [ExerciseCardData(name: v, isPrimary: true)]));
+    actions.add(
+      TrainingAction(
+        groupTitle: v,
+        cards: [ExerciseCardData(name: v, isPrimary: true)],
+      ),
+    );
     saveDraft();
     setState(() {});
   }
@@ -378,31 +516,63 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('添加平替动作'),
-        content: TextField(controller: c, decoration: const InputDecoration(hintText: '比如：哑铃卧推')),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')), FilledButton(onPressed: () => Navigator.pop(context, c.text.trim()), child: const Text('添加'))],
+        content: TextField(
+          controller: c,
+          decoration: const InputDecoration(hintText: '比如：哑铃卧推'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, c.text.trim()),
+            child: const Text('添加'),
+          ),
+        ],
       ),
     );
     if (v == null || v.isEmpty) return;
     final source = action.cards.first.sets.first;
-    action.cards.add(ExerciseCardData(name: v, sets: [TrainingSet(weightKg: source.weightKg, reps: source.reps, restSec: source.restSec)]));
+    action.cards.add(
+      ExerciseCardData(
+        name: v,
+        sets: [
+          TrainingSet(
+            weightKg: source.weightKg,
+            reps: source.reps,
+            restSec: source.restSec,
+          ),
+        ],
+      ),
+    );
     saveDraft();
     setState(() {});
   }
 
   void addSet(ExerciseCardData card) {
     final last = card.sets.last;
-    card.sets.add(TrainingSet(weightKg: last.weightKg, reps: last.reps, restSec: last.restSec));
+    card.sets.add(
+      TrainingSet(
+        weightKg: last.weightKg,
+        reps: last.reps,
+        restSec: last.restSec,
+      ),
+    );
     saveDraft();
     setState(() {});
   }
 
-  Future<void> generateAiPlan() async {
+  Future<void> generateAiPlan({String extraContext = ''}) async {
     if (selectedFolder.isEmpty) {
       toast('请先创建并选择一个文件夹');
       return;
     }
-    final templateName = nameController.text.trim().isEmpty ? '未命名模板' : nameController.text.trim();
-    final intent = intentController.text.trim();
+    final templateName = nameController.text.trim().isEmpty
+        ? '未命名模板'
+        : nameController.text.trim();
+    var intent = intentController.text.trim();
+    if (extraContext.isNotEmpty) intent = '$intent\n\n$extraContext';
     if (intent.isEmpty) {
       toast('请先填写意图');
       return;
@@ -426,7 +596,9 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
       });
       await saveDraft();
       toast('已生成计划，可继续手动微调');
-    } catch (e) {
+    } catch (e, s) {
+      debugPrint('[generateAiPlan] ERROR: $e');
+      debugPrint('[generateAiPlan] STACK: $s');
       if (!mounted) return;
       Navigator.of(context).pop();
       toast('生成失败：$e');
@@ -439,12 +611,19 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
     if (selectedFolder.isEmpty) return toast('请先创建并选择一个文件夹');
     if (actions.isEmpty) return toast('先添加至少一个动作');
 
-    final duplicated = widget.allTemplates.any((t) => t.folder == selectedFolder && t.name == name && t.id != widget.editing?.id);
+    final duplicated = widget.allTemplates.any(
+      (t) =>
+          t.folder == selectedFolder &&
+          t.name == name &&
+          t.id != widget.editing?.id,
+    );
     if (duplicated) return toast('同一文件夹下模板名不能重复');
 
     final all = [...widget.allTemplates];
     final item = TrainingTemplate(
-      id: widget.editing?.id ?? DateTime.now().microsecondsSinceEpoch.toString(),
+      id:
+          widget.editing?.id ??
+          DateTime.now().microsecondsSinceEpoch.toString(),
       folder: selectedFolder,
       name: name,
       actions: actions,
@@ -462,16 +641,33 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
     Navigator.pop(context);
   }
 
-  void toast(String t) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t)));
+  void toast(String t) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(t)));
 
-  Future<void> editNumber({required String title, required String initial, required ValueChanged<String> onSave}) async {
+  Future<void> editNumber({
+    required String title,
+    required String initial,
+    required ValueChanged<String> onSave,
+  }) async {
     final c = TextEditingController(text: initial);
     final v = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
         title: Text(title),
-        content: TextField(controller: c, keyboardType: const TextInputType.numberWithOptions(decimal: true)),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('取消')), FilledButton(onPressed: () => Navigator.pop(context, c.text.trim()), child: const Text('确定'))],
+        content: TextField(
+          controller: c,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, c.text.trim()),
+            child: const Text('确定'),
+          ),
+        ],
       ),
     );
     if (v == null) return;
@@ -484,30 +680,49 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(color: const Color(0xFF1B1F22), borderRadius: BorderRadius.circular(10)),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1B1F22),
+        borderRadius: BorderRadius.circular(10),
+      ),
       child: Row(
         children: [
-          SizedBox(width: 34, child: Text('#${index + 1}', style: const TextStyle(fontWeight: FontWeight.w700))),
+          SizedBox(
+            width: 34,
+            child: Text(
+              '#${index + 1}',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
           Expanded(
             child: _metricCell(
               label: 'kg',
               value: s.weightKg.toStringAsFixed(s.weightKg % 1 == 0 ? 0 : 1),
-              onTap: () => editNumber(title: '设置重量(kg)', initial: s.weightKg.toString(), onSave: (v) {
-                final p = double.tryParse(v);
-                if (p != null && p >= 0) s.weightKg = p;
-              }),
+              onTap: () => editNumber(
+                title: '设置重量(kg)',
+                initial: s.weightKg.toString(),
+                onSave: (v) {
+                  final p = double.tryParse(v);
+                  if (p != null && p >= 0) s.weightKg = p;
+                },
+              ),
               onInc: () => setState(() => s.weightKg += 5),
-              onDec: () => setState(() => s.weightKg = (s.weightKg - 5).clamp(0, 9999).toDouble()),
+              onDec: () => setState(
+                () => s.weightKg = (s.weightKg - 5).clamp(0, 9999).toDouble(),
+              ),
             ),
           ),
           Expanded(
             child: _metricCell(
               label: '次',
               value: '${s.reps}',
-              onTap: () => editNumber(title: '设置次数', initial: '${s.reps}', onSave: (v) {
-                final p = int.tryParse(v);
-                if (p != null && p > 0) s.reps = p;
-              }),
+              onTap: () => editNumber(
+                title: '设置次数',
+                initial: '${s.reps}',
+                onSave: (v) {
+                  final p = int.tryParse(v);
+                  if (p != null && p > 0) s.reps = p;
+                },
+              ),
               onInc: () => setState(() => s.reps += 1),
               onDec: () => setState(() => s.reps = s.reps > 1 ? s.reps - 1 : 1),
             ),
@@ -516,12 +731,18 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
             child: _metricCell(
               label: '秒',
               value: '${s.restSec}',
-              onTap: () => editNumber(title: '设置休息(秒)', initial: '${s.restSec}', onSave: (v) {
-                final p = int.tryParse(v);
-                if (p != null && p >= 0) s.restSec = p;
-              }),
+              onTap: () => editNumber(
+                title: '设置休息(秒)',
+                initial: '${s.restSec}',
+                onSave: (v) {
+                  final p = int.tryParse(v);
+                  if (p != null && p >= 0) s.restSec = p;
+                },
+              ),
               onInc: () => setState(() => s.restSec += 15),
-              onDec: () => setState(() => s.restSec = s.restSec >= 15 ? s.restSec - 15 : 0),
+              onDec: () => setState(
+                () => s.restSec = s.restSec >= 15 ? s.restSec - 15 : 0,
+              ),
             ),
           ),
         ],
@@ -529,7 +750,13 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
     );
   }
 
-  Widget _metricCell({required String label, required String value, required VoidCallback onTap, required VoidCallback onInc, required VoidCallback onDec}) {
+  Widget _metricCell({
+    required String label,
+    required String value,
+    required VoidCallback onTap,
+    required VoidCallback onInc,
+    required VoidCallback onDec,
+  }) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -549,7 +776,10 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
             onTap: onTap,
             child: FittedBox(
               fit: BoxFit.scaleDown,
-              child: Text('$value$label', style: const TextStyle(fontWeight: FontWeight.w700)),
+              child: Text(
+                '$value$label',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
             ),
           ),
         ),
@@ -580,7 +810,8 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
       child: NotificationListener<ScrollNotification>(
         onNotification: (notification) {
           if (controller.hasClients) {
-            _trackPages[actionIndex] = controller.page ?? controller.initialPage.toDouble();
+            _trackPages[actionIndex] =
+                controller.page ?? controller.initialPage.toDouble();
             setState(() {});
           }
           return false;
@@ -607,7 +838,15 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
                   child: Stack(
                     children: [
                       Card(
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: card.isPrimary ? const Color(0xFFB7FF00) : const Color(0xFF2D3338), width: 1.2)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          side: BorderSide(
+                            color: card.isPrimary
+                                ? const Color(0xFFB7FF00)
+                                : const Color(0xFF2D3338),
+                            width: 1.2,
+                          ),
+                        ),
                         child: Padding(
                           padding: const EdgeInsets.all(10),
                           child: Column(
@@ -616,12 +855,21 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
                               Row(
                                 children: [
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 4,
+                                    ),
                                     decoration: BoxDecoration(
                                       borderRadius: BorderRadius.circular(20),
-                                      color: card.isPrimary ? const Color(0xFFB7FF00).withValues(alpha: 0.2) : const Color(0xFF2A2F34),
+                                      color: card.isPrimary
+                                          ? const Color(
+                                              0xFFB7FF00,
+                                            ).withValues(alpha: 0.2)
+                                          : const Color(0xFF2A2F34),
                                     ),
-                                    child: Text(card.isPrimary ? '主动作' : '平替动作'),
+                                    child: Text(
+                                      card.isPrimary ? '主动作' : '平替动作',
+                                    ),
                                   ),
                                   const Spacer(),
                                   TextButton.icon(
@@ -641,18 +889,30 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
                                 ],
                               ),
                               const SizedBox(height: 4),
-                              Text(card.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                              Text(
+                                card.name,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                               const SizedBox(height: 8),
                               Expanded(
                                 child: ListView(
                                   children: [
-                                    ...card.sets.asMap().entries.map((e) => compactSetRow(e.value, e.key)),
+                                    ...card.sets.asMap().entries.map(
+                                      (e) => compactSetRow(e.value, e.key),
+                                    ),
                                   ],
                                 ),
                               ),
                               Row(
                                 children: [
-                                  FilledButton.tonalIcon(onPressed: () => addSet(card), icon: const Icon(Icons.add), label: const Text('加一组')),
+                                  FilledButton.tonalIcon(
+                                    onPressed: () => addSet(card),
+                                    icon: const Icon(Icons.add),
+                                    label: const Text('加一组'),
+                                  ),
                                   const SizedBox(width: 8),
                                   if (card.sets.length > 1)
                                     OutlinedButton.icon(
@@ -694,11 +954,10 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (!ready) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (!ready)
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.editing == null ? '创建训练模板' : '编辑训练模板'),
-      ),
+      appBar: AppBar(title: Text(widget.editing == null ? '创建训练模板' : '编辑训练模板')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -708,9 +967,13 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
               child: Column(
                 children: [
                   DropdownButtonFormField<String>(
-                    initialValue: folders.contains(selectedFolder) ? selectedFolder : null,
+                    initialValue: folders.contains(selectedFolder)
+                        ? selectedFolder
+                        : null,
                     decoration: const InputDecoration(labelText: '放到哪个文件夹'),
-                    items: folders.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                    items: folders
+                        .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                        .toList(),
                     onChanged: (v) {
                       if (v == null) return;
                       selectedFolder = v;
@@ -718,8 +981,19 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
                       setState(() {});
                     },
                   ),
-                  Align(alignment: Alignment.centerRight, child: TextButton.icon(onPressed: addFolder, icon: const Icon(Icons.add), label: const Text('创建文件夹'))),
-                  TextField(controller: nameController, decoration: const InputDecoration(labelText: '模板名称'), onChanged: (_) => saveDraft()),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: addFolder,
+                      icon: const Icon(Icons.add),
+                      label: const Text('创建文件夹'),
+                    ),
+                  ),
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: '模板名称'),
+                    onChanged: (_) => saveDraft(),
+                  ),
                 ],
               ),
             ),
@@ -742,7 +1016,10 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
             ),
           ),
           const SizedBox(height: 12),
-          const Text('动作轨道', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+          const Text(
+            '动作轨道',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
           const SizedBox(height: 8),
           ...actions.asMap().entries.map((e) {
             final idx = e.key;
@@ -758,7 +1035,11 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          TextButton.icon(onPressed: () => addAlternative(action), icon: const Icon(Icons.swap_horiz), label: const Text('加平替')),
+                          TextButton.icon(
+                            onPressed: () => addAlternative(action),
+                            icon: const Icon(Icons.swap_horiz),
+                            label: const Text('加平替'),
+                          ),
                           IconButton(
                             onPressed: () {
                               actions.removeAt(idx);
@@ -778,38 +1059,37 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
           }),
           Align(
             alignment: Alignment.centerLeft,
-            child: FilledButton.tonalIcon(onPressed: addActionGroup, icon: const Icon(Icons.add), label: const Text('加动作')),
+            child: FilledButton.tonalIcon(
+              onPressed: addActionGroup,
+              icon: const Icon(Icons.add),
+              label: const Text('加动作'),
+            ),
           ),
           const SizedBox(height: 20),
-          FilledButton.icon(onPressed: saveTemplate, icon: const Icon(Icons.save_outlined), label: const Text('保存这个模板')),
+          FilledButton.icon(
+            onPressed: saveTemplate,
+            icon: const Icon(Icons.save_outlined),
+            label: const Text('保存这个模板'),
+          ),
           const SizedBox(height: 20),
         ],
       ),
     );
   }
 
-  Widget _choice(String label, String current, List<String> options, ValueChanged<String> onChanged) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text('$label: '),
-        DropdownButton<String>(
-          value: current,
-          items: options.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-          onChanged: (v) {
-            if (v == null) return;
-            onChanged(v);
-          },
-        ),
-      ],
-    );
-  }
-
   Future<void> _editActionDetails(ExerciseCardData card) async {
-    final primaryController = TextEditingController(text: card.primaryMuscles.join('、'));
-    final secondaryController = TextEditingController(text: card.secondaryMuscles.join('、'));
-    final keyPointsController = TextEditingController(text: card.keyPoints.join('\n'));
-    final mistakesController = TextEditingController(text: card.commonMistakes.join('\n'));
+    final primaryController = TextEditingController(
+      text: card.primaryMuscles.join('、'),
+    );
+    final secondaryController = TextEditingController(
+      text: card.secondaryMuscles.join('、'),
+    );
+    final keyPointsController = TextEditingController(
+      text: card.keyPoints.join('\n'),
+    );
+    final mistakesController = TextEditingController(
+      text: card.commonMistakes.join('\n'),
+    );
 
     final saved = await showDialog<bool>(
       context: context,
@@ -834,30 +1114,58 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
                 TextField(
                   controller: keyPointsController,
                   maxLines: 5,
-                  decoration: const InputDecoration(labelText: '核心要领（每行一条，最多5条）'),
+                  decoration: const InputDecoration(
+                    labelText: '核心要领（每行一条，最多5条）',
+                  ),
                 ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: mistakesController,
                   maxLines: 5,
-                  decoration: const InputDecoration(labelText: '常见错误（每行一条，最多5条）'),
+                  decoration: const InputDecoration(
+                    labelText: '常见错误（每行一条，最多5条）',
+                  ),
                 ),
               ],
             ),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('保存')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('保存'),
+          ),
         ],
       ),
     );
 
     if (saved == true) {
-      card.primaryMuscles = primaryController.text.split(RegExp(r'[、,，]')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
-      card.secondaryMuscles = secondaryController.text.split(RegExp(r'[、,，]')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
-      card.keyPoints = keyPointsController.text.split('\n').map((e) => e.trim()).where((e) => e.isNotEmpty).take(5).toList();
-      card.commonMistakes = mistakesController.text.split('\n').map((e) => e.trim()).where((e) => e.isNotEmpty).take(5).toList();
+      card.primaryMuscles = primaryController.text
+          .split(RegExp(r'[、,，]'))
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+      card.secondaryMuscles = secondaryController.text
+          .split(RegExp(r'[、,，]'))
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
+      card.keyPoints = keyPointsController.text
+          .split('\n')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .take(5)
+          .toList();
+      card.commonMistakes = mistakesController.text
+          .split('\n')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .take(5)
+          .toList();
       await saveDraft();
       setState(() {});
     }
@@ -869,10 +1177,58 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
   }
 
   Future<void> _showAiGenerateDialog() async {
-    final dialogIntentController = TextEditingController(text: intentController.text.isEmpty ? buildIntent() : intentController.text);
-    String dialogPart = trainingPart;
-    String dialogAbility = ability;
-    String dialogPreference = preference;
+    final dialogIntentController = TextEditingController(
+      text: intentController.text.isEmpty
+          ? buildIntent()
+          : intentController.text,
+    );
+    final selectedParts = <String>{};
+    final selectedAbilities = <String>{};
+    final selectedPreferences = <String>{};
+
+    const bodyParts = [
+      '胸',
+      '背',
+      '肩',
+      '肱二头肌',
+      '肱三头肌',
+      '腹肌',
+      '臀',
+      '股四头肌',
+      '腘绳肌',
+      '小腿',
+    ];
+    const abilities = ['菜鸟', '小登', '中登', '老登'];
+    const preferences = ['固定器械', '哑铃', '徒手'];
+
+    Widget chipRow<T>(
+      List<T> items,
+      Set<T> selected,
+      String Function(T) label, {
+      required void Function(VoidCallback fn) setDialogState,
+    }) {
+      return Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: items
+            .map(
+              (item) => FilterChip(
+                label: Text(label(item)),
+                selected: selected.contains(item),
+                onSelected: (v) {
+                  setDialogState(() {
+                    if (v) {
+                      selected.add(item);
+                    } else {
+                      selected.remove(item);
+                    }
+                  });
+                },
+              ),
+            )
+            .toList(),
+      );
+    }
 
     final result = await showDialog<bool>(
       context: context,
@@ -884,28 +1240,6 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _choice('训练部位', dialogPart, const ['胸背', '肩臂', '腿臀', '全身'], (v) {
-                      dialogPart = v;
-                      dialogIntentController.text = '我想练$dialogPart，当前能力是$dialogAbility，偏好$dialogPreference。请帮我安排一套效率高、可执行的训练模板，并给出动作要领、常见错误、平替建议和整体评价。';
-                      setDialogState(() {});
-                    }),
-                    _choice('个人能力', dialogAbility, const ['新手', '中级', '高级'], (v) {
-                      dialogAbility = v;
-                      dialogIntentController.text = '我想练$dialogPart，当前能力是$dialogAbility，偏好$dialogPreference。请帮我安排一套效率高、可执行的训练模板，并给出动作要领、常见错误、平替建议和整体评价。';
-                      setDialogState(() {});
-                    }),
-                    _choice('训练偏好', dialogPreference, const ['固定器械', '哑铃', '徒手'], (v) {
-                      dialogPreference = v;
-                      dialogIntentController.text = '我想练$dialogPart，当前能力是$dialogAbility，偏好$dialogPreference。请帮我安排一套效率高、可执行的训练模板，并给出动作要领、常见错误、平替建议和整体评价。';
-                      setDialogState(() {});
-                    }),
-                  ],
-                ),
-                const SizedBox(height: 8),
                 TextField(
                   controller: dialogIntentController,
                   maxLines: 4,
@@ -925,28 +1259,75 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
                     label: const Text('一键清空意图'),
                   ),
                 ),
+                const SizedBox(height: 12),
+                const Text(
+                  '训练部位',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 6),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: chipRow(
+                    bodyParts,
+                    selectedParts,
+                    (p) => p,
+                    setDialogState: setDialogState,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  '健身经验',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 6),
+                chipRow(
+                  abilities,
+                  selectedAbilities,
+                  (a) => a,
+                  setDialogState: setDialogState,
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  '训练偏好',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 6),
+                chipRow(
+                  preferences,
+                  selectedPreferences,
+                  (p) => p,
+                  setDialogState: setDialogState,
+                ),
               ],
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('取消')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('开始生成')),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('开始生成'),
+            ),
           ],
         ),
       ),
     );
     if (result == true) {
-      trainingPart = dialogPart;
-      ability = dialogAbility;
-      preference = dialogPreference;
+      final extraParts = <String>[];
+      if (selectedParts.isNotEmpty)
+        extraParts.add('训练部位：${selectedParts.join('、')}');
+      if (selectedAbilities.isNotEmpty)
+        extraParts.add('健身经验：${selectedAbilities.join('、')}');
+      if (selectedPreferences.isNotEmpty)
+        extraParts.add('训练偏好：${selectedPreferences.join('、')}');
       intentController.text = dialogIntentController.text;
       await saveDraft();
-      await generateAiPlan();
+      await generateAiPlan(extraContext: extraParts.join('\n'));
     }
-    dialogIntentController.dispose();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      dialogIntentController.dispose();
+    });
   }
 }
-
-
-
-
