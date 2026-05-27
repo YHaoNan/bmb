@@ -13,6 +13,17 @@ extension FeelingLabel on Feeling {
         return '无法完成';
     }
   }
+
+  String get emoji {
+    switch (this) {
+      case Feeling.easy:
+        return '😋';
+      case Feeling.moderate:
+        return '😣';
+      case Feeling.failed:
+        return '🥵';
+    }
+  }
 }
 
 class SetRecord {
@@ -132,7 +143,7 @@ class WorkoutSession {
     final d = duration;
     if (d == null) return '进行中';
     final min = d.inMinutes;
-    if (min < 60) return '${min}分钟';
+    if (min < 60) return '$min分钟';
     return '${min ~/ 60}小时${min % 60}分钟';
   }
 
