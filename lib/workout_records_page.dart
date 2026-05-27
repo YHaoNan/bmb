@@ -27,11 +27,11 @@ class _WorkoutRecordsPageState extends State<WorkoutRecordsPage> {
   }
 
   Future<void> _reload() async {
-    final workouts = await widget.store.loadWorkouts();
+    final workouts = await widget.store.loadSessions();
     final templates = await widget.store.loadTemplates();
     if (!mounted) return;
     setState(() {
-      _workouts = workouts..sort((a, b) => b.startTime.compareTo(a.startTime));
+      _workouts = workouts;
       _templates = templates;
       _loading = false;
     });
@@ -54,17 +54,12 @@ class _WorkoutRecordsPageState extends State<WorkoutRecordsPage> {
   }
 
   void _startWorkout(TrainingTemplate template) async {
-    final result = await Navigator.push<WorkoutSession>(
+    await Navigator.push<void>(
       context,
       MaterialPageRoute(
-        builder: (_) => WorkoutPage(template: template, onSaved: _reload),
+        builder: (_) => WorkoutPage(template: template, store: widget.store, onSaved: _reload),
       ),
     );
-    if (result != null) {
-      _workouts.insert(0, result);
-      await widget.store.saveWorkouts(_workouts);
-      _reload();
-    }
   }
 
   Future<void> _selectTemplate() async {
@@ -202,6 +197,24 @@ class _WorkoutRecordsPageState extends State<WorkoutRecordsPage> {
     );
   }
 
+  void _deleteSession(WorkoutSession session) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除记录'),
+        content: Text('确定删除「${session.templateName}」的训练记录？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('删除')),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      await widget.store.deleteSession(session.id);
+      _reload();
+    }
+  }
+
   Widget _buildSessionCard(WorkoutSession session) {
     final dateStr =
         '${session.startTime.month}/${session.startTime.day} ${session.startTime.hour.toString().padLeft(2, '0')}:${session.startTime.minute.toString().padLeft(2, '0')}';
@@ -209,12 +222,16 @@ class _WorkoutRecordsPageState extends State<WorkoutRecordsPage> {
       margin: const EdgeInsets.only(bottom: 8),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => WorkoutSummaryPage(session: session),
-          ),
-        ),
+        onTap: () async {
+          final full = await widget.store.loadFullSession(session.id);
+          if (!context.mounted) return;
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => WorkoutSummaryPage(session: full ?? session),
+            ),
+          );
+        },
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Row(
@@ -238,6 +255,10 @@ class _WorkoutRecordsPageState extends State<WorkoutRecordsPage> {
                     ),
                   ],
                 ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete_outline, color: Colors.grey),
+                onPressed: () => _deleteSession(session),
               ),
               const Icon(Icons.chevron_right, color: Colors.grey),
             ],

@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'models.dart';
+import 'template_store.dart';
 import 'workout_models.dart';
+import 'ai_plan_service.dart';
 
 class _SetState {
   String exerciseName;
@@ -17,9 +20,9 @@ class _SetState {
   Feeling? feeling;
   String? compensation;
   String? notes;
-  final double _origWeight;
-  final int _origReps;
-  final int _origRest;
+  double _origWeight;
+  int _origReps;
+  int _origRest;
 
   bool get weightModified => weightKg != _origWeight;
   bool get repsModified => reps != _origReps;
@@ -55,6 +58,57 @@ class _SetState {
     rec.sets.add(SetRecord(weightKg: weightKg, reps: reps, restSec: restSec));
     return rec;
   }
+
+  Map<String, dynamic> toJson() => {
+    'exerciseName': exerciseName,
+    'groupTitle': groupTitle,
+    'isAlternative': isAlternative,
+    'primaryMuscles': primaryMuscles,
+    'secondaryMuscles': secondaryMuscles,
+    'weightKg': weightKg,
+    'reps': reps,
+    'restSec': restSec,
+    'isComplete': isComplete,
+    'editing': editing,
+    'feeling': feeling?.name,
+    'compensation': compensation,
+    'notes': notes,
+    'origWeightKg': _origWeight,
+    'origReps': _origReps,
+    'origRestSec': _origRest,
+  };
+
+  static _SetState fromJson(Map<String, dynamic> json) {
+    final s = _SetState(
+      exerciseName: json['exerciseName'] as String,
+      groupTitle: json['groupTitle'] as String,
+      isAlternative: json['isAlternative'] as bool? ?? false,
+      primaryMuscles: (json['primaryMuscles'] as List<dynamic>?)?.cast<String>() ?? [],
+      secondaryMuscles: (json['secondaryMuscles'] as List<dynamic>?)?.cast<String>() ?? [],
+      weightKg: (json['weightKg'] as num).toDouble(),
+      reps: json['reps'] as int,
+      restSec: json['restSec'] as int,
+    );
+    s._setOrig(
+      (json['origWeightKg'] as num?)?.toDouble() ?? s.weightKg,
+      json['origReps'] as int? ?? s.reps,
+      json['origRestSec'] as int? ?? s.restSec,
+    );
+    s.isComplete = json['isComplete'] as bool? ?? false;
+    s.editing = false;
+    s.feeling = (json['feeling'] as String?) != null
+        ? Feeling.values.firstWhere((f) => f.name == json['feeling'])
+        : null;
+    s.compensation = json['compensation'] as String?;
+    s.notes = json['notes'] as String?;
+    return s;
+  }
+
+  void _setOrig(double w, int r, int rs) {
+    _origWeight = w;
+    _origReps = r;
+    _origRest = rs;
+  }
 }
 
 class _GroupWorkout {
@@ -68,11 +122,13 @@ class _GroupWorkout {
   _GroupWorkout({
     required this.groupTitle,
     required this.cards,
-  }) : sets = [];
+    List<_SetState>? sets,
+    this.activeCardIndex = 0,
+    this.groupCollapsed = true,
+  }) : sets = sets ?? [];
 
   ExerciseCardData get activeCard => cards[activeCardIndex];
 
-  /// 按动作名称统计完成组数和计划组数
   Map<String, ({int done, int planned})> actionStats() {
     final result = <String, ({int done, int planned})>{};
     for (final c in cards) {
@@ -105,22 +161,44 @@ class _GroupWorkout {
       restSec: ts.restSec,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'groupTitle': groupTitle,
+    'activeCardIndex': activeCardIndex,
+    'groupCollapsed': groupCollapsed,
+    'cards': cards.map((c) => c.toJson()).toList(),
+    'sets': sets.map((s) => s.toJson()).toList(),
+  };
+
+  static _GroupWorkout fromJson(Map<String, dynamic> json) => _GroupWorkout(
+    groupTitle: json['groupTitle'] as String,
+    cards: (json['cards'] as List<dynamic>)
+        .map((c) => ExerciseCardData.fromJson(c as Map<String, dynamic>))
+        .toList(),
+    sets: (json['sets'] as List<dynamic>)
+        .map((s) => _SetState.fromJson(s as Map<String, dynamic>))
+        .toList(),
+    activeCardIndex: json['activeCardIndex'] as int? ?? 0,
+    groupCollapsed: json['groupCollapsed'] as bool? ?? true,
+  );
 }
 
 class WorkoutPage extends StatefulWidget {
-  const WorkoutPage({super.key, required this.template, required this.onSaved});
+  const WorkoutPage({super.key, required this.template, required this.store, required this.onSaved, this.savedStateJson});
 
   final TrainingTemplate template;
+  final TemplateStore store;
   final VoidCallback onSaved;
+  final String? savedStateJson;
 
   @override
   State<WorkoutPage> createState() => _WorkoutPageState();
 }
 
-class _WorkoutPageState extends State<WorkoutPage> {
-  final _startTime = DateTime.now();
-  Timer? _timer;
+class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
+  late DateTime _startTime;
   late String _id;
+  Timer? _timer;
 
   final List<_GroupWorkout> _groups = [];
   int? _activeGIdx;
@@ -139,18 +217,32 @@ class _WorkoutPageState extends State<WorkoutPage> {
   @override
   void initState() {
     super.initState();
-    _id = DateTime.now().microsecondsSinceEpoch.toString();
+    WidgetsBinding.instance.addObserver(this);
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
-    for (final action in widget.template.actions) {
-      _groups.add(_GroupWorkout(
-        groupTitle: action.groupTitle,
-        cards: List.from(action.cards),
-      ));
+    if (widget.savedStateJson != null) {
+      _restoreFromJson(widget.savedStateJson!);
+    } else {
+      _startTime = DateTime.now();
+      _id = DateTime.now().microsecondsSinceEpoch.toString();
+      for (final action in widget.template.actions) {
+        _groups.add(_GroupWorkout(
+          groupTitle: action.groupTitle,
+          cards: List.from(action.cards),
+        ));
+      }
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      _persistState();
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _restTimer?.cancel();
     _weightCtrl.dispose();
@@ -207,6 +299,32 @@ class _WorkoutPageState extends State<WorkoutPage> {
     _notesCtrl.text = s.notes ?? '';
   }
 
+  String _serializeState() => jsonEncode({
+    'id': _id,
+    'templateId': widget.template.id,
+    'startTime': _startTime.toIso8601String(),
+    'activeGIdx': _activeGIdx,
+    'activeSIdx': _activeSIdx,
+    'groups': _groups.map((g) => g.toJson()).toList(),
+  });
+
+  void _restoreFromJson(String json) {
+    final data = jsonDecode(json) as Map<String, dynamic>;
+    _id = data['id'] as String;
+    _startTime = DateTime.parse(data['startTime'] as String);
+    _activeGIdx = data['activeGIdx'] as int?;
+    _activeSIdx = data['activeSIdx'] as int?;
+    _groups.addAll(
+      (data['groups'] as List<dynamic>).map(
+        (g) => _GroupWorkout.fromJson(g as Map<String, dynamic>),
+      ),
+    );
+  }
+
+  void _persistState() {
+    widget.store.saveActiveWorkout(_serializeState());
+  }
+
   void _startSet(int gIdx, int sIdx) {
     _skipRest();
     final s = _groups[gIdx].sets[sIdx];
@@ -215,6 +333,7 @@ class _WorkoutPageState extends State<WorkoutPage> {
     s.editing = true;
     _loadCtrlsFromSet(s);
     setState(() {});
+    _persistState();
   }
 
   void _completeOrSaveSet() {
@@ -235,6 +354,7 @@ class _WorkoutPageState extends State<WorkoutPage> {
 
     _restartRestTimer(s.restSec);
     setState(() {});
+    _persistState();
   }
 
   void _reopenSet(int gIdx, int sIdx) {
@@ -245,6 +365,7 @@ class _WorkoutPageState extends State<WorkoutPage> {
     s.editing = true;
     _loadCtrlsFromSet(s);
     setState(() {});
+    _persistState();
   }
 
   bool get _canAddSet =>
@@ -255,6 +376,7 @@ class _WorkoutPageState extends State<WorkoutPage> {
   void _addExtraSet(int gIdx) {
     _groups[gIdx].addExtraSetFromActiveCard();
     setState(() {});
+    _persistState();
   }
 
   void _switchCardInGroup(int gIdx, int cardIdx) {
@@ -262,6 +384,7 @@ class _WorkoutPageState extends State<WorkoutPage> {
     if (cardIdx == g.activeCardIndex) return;
     g.activeCardIndex = cardIdx;
     setState(() {});
+    _persistState();
   }
 
   void _deleteCardFromGroup(int gIdx, int cardIdx) {
@@ -276,6 +399,7 @@ class _WorkoutPageState extends State<WorkoutPage> {
       _groups.removeAt(gIdx);
     }
     setState(() {});
+    _persistState();
   }
 
   Future<void> _finishWorkout() async {
@@ -319,8 +443,46 @@ class _WorkoutPageState extends State<WorkoutPage> {
       ),
     );
     if (confirmed == true && mounted) {
+      await widget.store.saveWorkoutSession(session);
+      widget.store.clearActiveWorkout();
+
+      // AI 评估（后台执行，不阻塞返回）
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => const Center(
+            child: Card(
+              margin: EdgeInsets.all(40),
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text('正在生成AI评估…'),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+
+      final aiService = AIPlanService(store: widget.store);
+      try {
+        final summary = await aiService.evaluateWorkout(session);
+        if (mounted) Navigator.pop(context); // 关掉 loading
+        session.aiSummary = summary;
+        await widget.store.saveWorkoutSession(session);
+      } catch (e) {
+        debugPrint('[finishWorkout] AI评估失败: $e');
+        if (mounted) Navigator.pop(context); // 关掉 loading
+      }
+
       widget.onSaved();
-      Navigator.pop(context, session);
+      if (mounted) Navigator.pop(context);
     }
   }
 

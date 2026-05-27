@@ -7,6 +7,7 @@ import 'package:langchain_openai/langchain_openai.dart';
 
 import 'models.dart';
 import 'template_store.dart';
+import 'workout_models.dart';
 
 class AIPlanService {
   AIPlanService({required this.store});
@@ -132,6 +133,58 @@ class AIPlanService {
   String _preview(String text, int max) {
     final t = text.replaceAll('\n', '\\n');
     return t.length <= max ? t : '${t.substring(0, max)}...';
+  }
+
+  Future<String> evaluateWorkout(WorkoutSession session) async {
+    final config = await store.loadModelConfig();
+    final baseUrl = (config['baseUrl'] ?? '').trim();
+    final modelName = (config['modelName'] ?? '').trim();
+    final apiKey = (config['apiKey'] ?? '').trim();
+
+    if (baseUrl.isEmpty || modelName.isEmpty || apiKey.isEmpty) {
+      throw Exception('请先在模型配置页填写 baseUrl、modelName、apiKey');
+    }
+
+    // 构建动作详情文本
+    final buffer = StringBuffer();
+    for (final e in session.exercises) {
+      for (int i = 0; i < e.sets.length; i++) {
+        final s = e.sets[i];
+        final feelingText = e.feeling?.label ?? '未记录';
+        buffer.writeln(
+          '${e.groupTitle} - ${e.cardName}: ${s.weightKg.toStringAsFixed(0)}kg × ${s.reps}次, 休息${s.restSec}秒, 感受: $feelingText',
+        );
+      }
+    }
+
+    final promptTemplate = await rootBundle.loadString(
+      'assets/prompts/workout_evaluate_prompt.txt',
+    );
+    final prompt = promptTemplate
+        .replaceAll('{{template_name}}', session.templateName)
+        .replaceAll('{{duration}}', session.durationText)
+        .replaceAll('{{total_sets}}', '${session.totalCount}')
+        .replaceAll('{{exercise_details}}', buffer.toString().trim());
+
+    final cleanBaseUrl = baseUrl.endsWith('/chat/completions')
+        ? baseUrl.substring(0, baseUrl.length - '/chat/completions'.length)
+        : baseUrl.endsWith('/')
+        ? baseUrl.substring(0, baseUrl.length - 1)
+        : baseUrl;
+
+    final chat = ChatOpenAI(
+      apiKey: apiKey,
+      baseUrl: cleanBaseUrl,
+      defaultOptions: ChatOpenAIOptions(model: modelName, temperature: 0.5),
+    );
+
+    final messages = [
+      ChatMessage.system('你是专业的健身训练评估助手。用简体中文回复。'),
+      ChatMessage.humanText(prompt),
+    ];
+
+    final aiMessage = await chat.call(messages);
+    return aiMessage.content as String;
   }
 
   String _maskKey(String key) {

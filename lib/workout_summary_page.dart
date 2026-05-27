@@ -98,7 +98,7 @@ class WorkoutSummaryPage extends StatelessWidget {
     final feelingWidget = rec.feeling != null
         ? Chip(
             label: Text(
-              rec.feeling!.label,
+              '${rec.feeling!.emoji} ${rec.feeling!.label}',
               style: const TextStyle(fontSize: 12),
             ),
             visualDensity: VisualDensity.compact,

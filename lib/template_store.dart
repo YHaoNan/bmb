@@ -12,7 +12,7 @@ import 'workout_models.dart';
 class TemplateStore {
   static Database? _db;
   static const _dbName = 'bmb_data.db';
-  static const _dbVersion = 1;
+  static const _dbVersion = 2;
 
   Future<Database> get _database async {
     if (_db != null && _db!.isOpen) return _db!;
@@ -29,6 +29,9 @@ class TemplateStore {
       version: _dbVersion,
       onCreate: (db, version) async {
         await _createTables(db);
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        await _migrateDb(db, oldVersion, newVersion);
       },
     );
   }
@@ -58,8 +61,43 @@ class TemplateStore {
       )
     ''');
     await db.execute('''
-      CREATE TABLE IF NOT EXISTS workouts (
+      CREATE TABLE IF NOT EXISTS workout_sessions (
         id TEXT PRIMARY KEY,
+        template_id TEXT,
+        template_name TEXT,
+        start_time TEXT NOT NULL,
+        end_time TEXT,
+        ai_summary TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS workout_sets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        group_title TEXT NOT NULL,
+        card_name TEXT NOT NULL,
+        exercise_name TEXT NOT NULL,
+        is_alternative INTEGER NOT NULL DEFAULT 0,
+        set_index INTEGER NOT NULL,
+        weight_kg REAL NOT NULL,
+        reps INTEGER NOT NULL,
+        rest_sec INTEGER NOT NULL,
+        feeling TEXT,
+        compensation TEXT,
+        notes TEXT,
+        weight_modified INTEGER NOT NULL DEFAULT 0,
+        reps_modified INTEGER NOT NULL DEFAULT 0,
+        rest_modified INTEGER NOT NULL DEFAULT 0,
+        FOREIGN KEY (session_id) REFERENCES workout_sessions(id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_workout_sets_session
+      ON workout_sets(session_id)
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS active_workout (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
         data TEXT NOT NULL
       )
     ''');
@@ -164,25 +202,152 @@ class TemplateStore {
     );
   }
 
-  // ─── Workouts ───
+  // ─── Workouts (relational) ───
 
-  Future<List<WorkoutSession>> loadWorkouts() async {
+  Future<List<WorkoutSession>> loadSessions() async {
     final db = await _database;
-    final rows = await db.query('workouts');
-    return rows
-        .map((r) =>
-            WorkoutSession.fromJson(jsonDecode(r['data'] as String) as Map<String, dynamic>))
-        .toList();
+    // 用子查询一次性带出每组 session 的 set 数和有感觉得 set 数
+    final rows = await db.rawQuery('''
+      SELECT ws.*,
+        (SELECT COUNT(*) FROM workout_sets WHERE session_id = ws.id) AS set_count,
+        (SELECT COUNT(*) FROM workout_sets WHERE session_id = ws.id AND feeling IS NOT NULL) AS feeling_count
+      FROM workout_sessions ws
+      ORDER BY ws.start_time DESC
+    ''');
+    return rows.map((r) => WorkoutSession(
+      id: r['id'] as String,
+      startTime: DateTime.parse(r['start_time'] as String),
+      endTime: r['end_time'] != null ? DateTime.parse(r['end_time'] as String) : null,
+      templateId: r['template_id'] as String? ?? '',
+      templateName: r['template_name'] as String? ?? '',
+      totalSets: r['set_count'] as int?,
+      completedSets: r['feeling_count'] as int?,
+      aiSummary: r['ai_summary'] as String?,
+    )).toList();
   }
 
-  Future<void> saveWorkouts(List<WorkoutSession> workouts) async {
+  Future<WorkoutSession?> loadFullSession(String sessionId) async {
     final db = await _database;
-    final batch = db.batch();
-    batch.delete('workouts');
-    for (final w in workouts) {
-      batch.insert('workouts', {'id': w.id, 'data': jsonEncode(w.toJson())});
-    }
-    await batch.commit(noResult: true);
+    final rows = await db.query('workout_sessions', where: 'id = ?', whereArgs: [sessionId]);
+    if (rows.isEmpty) return null;
+    final r = rows.first;
+    final sets = await db.query('workout_sets',
+        where: 'session_id = ?', whereArgs: [sessionId], orderBy: 'set_index');
+    final exercises = sets.map((s) => ExerciseRecord(
+      groupTitle: s['group_title'] as String? ?? '',
+      cardName: s['card_name'] as String? ?? '',
+      isAlternative: (s['is_alternative'] as int?) == 1,
+      weightModified: (s['weight_modified'] as int?) == 1,
+      repsModified: (s['reps_modified'] as int?) == 1,
+      restModified: (s['rest_modified'] as int?) == 1,
+      feeling: s['feeling'] != null ? Feeling.values.byName(s['feeling'] as String) : null,
+      compensation: s['compensation'] as String?,
+      notes: s['notes'] as String?,
+      sets: [SetRecord(
+        weightKg: (s['weight_kg'] as num?)?.toDouble() ?? 0,
+        reps: (s['reps'] as int?) ?? 0,
+        restSec: (s['rest_sec'] as int?) ?? 0,
+      )],
+    )).toList();
+    return WorkoutSession(
+      id: r['id'] as String,
+      startTime: DateTime.parse(r['start_time'] as String),
+      endTime: r['end_time'] != null ? DateTime.parse(r['end_time'] as String) : null,
+      templateId: r['template_id'] as String? ?? '',
+      templateName: r['template_name'] as String? ?? '',
+      aiSummary: r['ai_summary'] as String?,
+      exercises: exercises,
+    );
+  }
+
+  Future<void> saveWorkoutSession(WorkoutSession session) async {
+    final db = await _database;
+    await _ensureAiSummaryColumn(db);
+    await db.transaction((txn) async {
+      await txn.insert('workout_sessions', {
+        'id': session.id,
+        'template_id': session.templateId,
+        'template_name': session.templateName,
+        'start_time': session.startTime.toIso8601String(),
+        'end_time': session.endTime?.toIso8601String(),
+        'ai_summary': session.aiSummary,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.delete('workout_sets', where: 'session_id = ?', whereArgs: [session.id]);
+      final batch = txn.batch();
+      for (int i = 0; i < session.exercises.length; i++) {
+        final e = session.exercises[i];
+        for (int j = 0; j < e.sets.length; j++) {
+          final s = e.sets[j];
+          batch.insert('workout_sets', {
+            'session_id': session.id,
+            'group_title': e.groupTitle,
+            'card_name': e.cardName,
+            'exercise_name': e.cardName,
+            'is_alternative': e.isAlternative ? 1 : 0,
+            'set_index': i * 100 + j,
+            'weight_kg': s.weightKg,
+            'reps': s.reps,
+            'rest_sec': s.restSec,
+            'feeling': e.feeling?.name,
+            'compensation': e.compensation,
+            'notes': e.notes,
+            'weight_modified': e.weightModified ? 1 : 0,
+            'reps_modified': e.repsModified ? 1 : 0,
+            'rest_modified': e.restModified ? 1 : 0,
+          });
+        }
+      }
+      await batch.commit(noResult: true);
+    });
+  }
+
+  Future<void> deleteSession(String sessionId) async {
+    final db = await _database;
+    await db.delete('workout_sets', where: 'session_id = ?', whereArgs: [sessionId]);
+    await db.delete('workout_sessions', where: 'id = ?', whereArgs: [sessionId]);
+  }
+
+  // ─── Active Workout ───
+
+  /// 确保 active_workout 表存在（兼容旧 DB 文件缺失该表的情况）
+  Future<void> _ensureActiveWorkoutTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS active_workout (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        data TEXT NOT NULL
+      )
+    ''');
+  }
+
+  /// 兼容旧 DB 文件缺失 ai_summary 列的情况
+  Future<void> _ensureAiSummaryColumn(Database db) async {
+    try {
+      await db.execute('ALTER TABLE workout_sessions ADD COLUMN ai_summary TEXT');
+    } catch (_) {}
+  }
+
+  Future<void> saveActiveWorkout(String json) async {
+    final db = await _database;
+    await _ensureActiveWorkoutTable(db);
+    await db.insert(
+      'active_workout',
+      {'id': 1, 'data': json},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<String?> loadActiveWorkout() async {
+    final db = await _database;
+    await _ensureActiveWorkoutTable(db);
+    final rows = await db.query('active_workout', where: 'id = 1');
+    if (rows.isEmpty) return null;
+    return rows.first['data'] as String;
+  }
+
+  Future<void> clearActiveWorkout() async {
+    final db = await _database;
+    await _ensureActiveWorkoutTable(db);
+    await db.delete('active_workout', where: 'id = 1');
   }
 
   // ─── 备份 ───
@@ -219,9 +384,13 @@ class TemplateStore {
         ? jsonDecode(configRows.first['data'] as String)
         : null;
 
-    final workouts = (await db.query('workouts'))
-        .map((r) => jsonDecode(r['data'] as String))
-        .toList();
+    final sessions = await db.query('workout_sessions');
+    final sessionIds = sessions.map((r) => r['id'] as String).toList();
+    final allSets = sessionIds.isNotEmpty
+        ? await db.query('workout_sets',
+            where: 'session_id IN (${sessionIds.map((_) => '?').join(',')})',
+            whereArgs: sessionIds)
+        : <Map<String, dynamic>>[];
 
     final now = DateTime.now();
     final ts = '${now.year}${_pad(now.month)}${_pad(now.day)}_${_pad(now.hour)}${_pad(now.minute)}${_pad(now.second)}';
@@ -230,14 +399,15 @@ class TemplateStore {
     final backupDir = await _backupDirPath;
     final file = File('$backupDir/$fileName');
     file.writeAsStringSync(jsonEncode({
-      'version': 1,
+      'version': 2,
       'exportedAt': now.toIso8601String(),
       'data': {
         'templates': templates,
         'folders': folders,
         'draft': draft,
         'modelConfig': modelConfig,
-        'workouts': workouts,
+        'sessions': sessions,
+        'sets': allSets,
       },
     }));
     return file.path;
@@ -314,13 +484,59 @@ class TemplateStore {
             conflictAlgorithm: ConflictAlgorithm.replace);
       }
 
-      // workouts
-      batch.delete('workouts');
-      final workouts = content['workouts'] as List<dynamic>? ?? [];
-      for (final item in workouts) {
-        final w = WorkoutSession.fromJson(item as Map<String, dynamic>);
-        batch.insert('workouts', {'id': w.id, 'data': jsonEncode(w.toJson())},
-            conflictAlgorithm: ConflictAlgorithm.replace);
+      // workout sessions (relational)
+      batch.delete('workout_sets');
+      batch.delete('workout_sessions');
+      final av = content['workouts'] as List<dynamic>?; // legacy v1
+      if (av != null) {
+        for (final item in av) {
+          final w = WorkoutSession.fromJson(item as Map<String, dynamic>);
+          batch.insert('workout_sessions', {
+            'id': w.id,
+            'template_id': w.templateId,
+            'template_name': w.templateName,
+            'start_time': w.startTime.toIso8601String(),
+            'end_time': w.endTime?.toIso8601String(),
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
+          for (int i = 0; i < w.exercises.length; i++) {
+            final e = w.exercises[i];
+            for (int j = 0; j < e.sets.length; j++) {
+              final s = e.sets[j];
+              batch.insert('workout_sets', {
+                'session_id': w.id,
+                'group_title': e.groupTitle,
+                'card_name': e.cardName,
+                'exercise_name': e.cardName,
+                'is_alternative': e.isAlternative ? 1 : 0,
+                'set_index': i * 100 + j,
+                'weight_kg': s.weightKg,
+                'reps': s.reps,
+                'rest_sec': s.restSec,
+                'feeling': e.feeling?.name,
+                'compensation': e.compensation,
+                'notes': e.notes,
+                'weight_modified': e.weightModified ? 1 : 0,
+                'reps_modified': e.repsModified ? 1 : 0,
+                'rest_modified': e.restModified ? 1 : 0,
+              });
+            }
+          }
+        }
+      }
+      final sessions = content['sessions'] as List<dynamic>?;
+      if (sessions != null) {
+        for (final s in sessions) {
+          batch.insert('workout_sessions', s as Map<String, dynamic>,
+              conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+      }
+      final sets = content['sets'] as List<dynamic>?;
+      if (sets != null) {
+        for (final s in sets) {
+          final map = s as Map<String, dynamic>;
+          batch.insert('workout_sets', map,
+              conflictAlgorithm: ConflictAlgorithm.replace);
+        }
       }
 
       await batch.commit(noResult: true);
@@ -436,5 +652,99 @@ class TemplateStore {
 
     await db.close();
     await flagFile.writeAsString('1');
+  }
+
+  /// DB v1 → v2: migrate workouts blob to workout_sessions + workout_sets
+  Future<void> _migrateDb(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // ensure all required tables exist
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS active_workout (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          data TEXT NOT NULL
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS workout_sessions (
+          id TEXT PRIMARY KEY,
+          template_id TEXT,
+          template_name TEXT,
+          start_time TEXT NOT NULL,
+          end_time TEXT,
+          ai_summary TEXT
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS workout_sets (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL,
+          group_title TEXT NOT NULL,
+          card_name TEXT NOT NULL,
+          exercise_name TEXT NOT NULL,
+          is_alternative INTEGER NOT NULL DEFAULT 0,
+          set_index INTEGER NOT NULL,
+          weight_kg REAL NOT NULL,
+          reps INTEGER NOT NULL,
+          rest_sec INTEGER NOT NULL,
+          feeling TEXT,
+          compensation TEXT,
+          notes TEXT,
+          weight_modified INTEGER NOT NULL DEFAULT 0,
+          reps_modified INTEGER NOT NULL DEFAULT 0,
+          rest_modified INTEGER NOT NULL DEFAULT 0,
+          FOREIGN KEY (session_id) REFERENCES workout_sessions(id) ON DELETE CASCADE
+        )
+      ''');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_workout_sets_session ON workout_sets(session_id)');
+
+      // migrate old data
+      final oldRows = await db.query('workouts');
+      for (final row in oldRows) {
+        try {
+          final w = WorkoutSession.fromJson(
+              jsonDecode(row['data'] as String) as Map<String, dynamic>);
+          await db.insert('workout_sessions', {
+            'id': w.id,
+            'template_id': w.templateId,
+            'template_name': w.templateName,
+            'start_time': w.startTime.toIso8601String(),
+            'end_time': w.endTime?.toIso8601String(),
+          }, conflictAlgorithm: ConflictAlgorithm.replace);
+          for (int i = 0; i < w.exercises.length; i++) {
+            final e = w.exercises[i];
+            for (int j = 0; j < e.sets.length; j++) {
+              final s = e.sets[j];
+              await db.insert('workout_sets', {
+                'session_id': w.id,
+                'group_title': e.groupTitle,
+                'card_name': e.cardName,
+                'exercise_name': e.cardName,
+                'is_alternative': e.isAlternative ? 1 : 0,
+                'set_index': i * 100 + j,
+                'weight_kg': s.weightKg,
+                'reps': s.reps,
+                'rest_sec': s.restSec,
+                'feeling': e.feeling?.name,
+                'compensation': e.compensation,
+                'notes': e.notes,
+                'weight_modified': e.weightModified ? 1 : 0,
+                'reps_modified': e.repsModified ? 1 : 0,
+                'rest_modified': e.restModified ? 1 : 0,
+              });
+            }
+          }
+        } catch (e) {
+          debugPrint('[migrate v1->v2] skip row: $e');
+        }
+      }
+
+      // drop old table
+      await db.execute('DROP TABLE IF EXISTS workouts');
+    }
+
+    // 兼容旧 DB：尝试添加 ai_summary 列（若已存在则静默失败）
+    try {
+      await db.execute('ALTER TABLE workout_sessions ADD COLUMN ai_summary TEXT');
+    } catch (_) {}
   }
 }

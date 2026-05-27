@@ -123,6 +123,8 @@ class WorkoutSession {
     List<ExerciseRecord>? exercises,
     this.note,
     this.aiSummary,
+    this.totalSets,
+    this.completedSets,
   }) : exercises = exercises ?? [];
 
   String id;
@@ -133,6 +135,8 @@ class WorkoutSession {
   List<ExerciseRecord> exercises;
   String? note;
   String? aiSummary;
+  int? totalSets;
+  int? completedSets;
 
   Duration? get duration {
     if (endTime == null) return null;
@@ -147,9 +151,9 @@ class WorkoutSession {
     return '${min ~/ 60}小时${min % 60}分钟';
   }
 
-  int get completedCount => exercises.where((e) => e.feeling != null).length;
+  int get completedCount => completedSets ?? exercises.where((e) => e.feeling != null).length;
 
-  int get totalCount => exercises.length;
+  int get totalCount => totalSets ?? exercises.length;
 
   Map<String, dynamic> toJson() => {
     'id': id,

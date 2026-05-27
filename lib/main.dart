@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'models.dart';
 import 'template_store.dart';
@@ -96,6 +97,62 @@ class _TemplateHomePageState extends State<TemplateHomePage> {
   void initState() {
     super.initState();
     reload();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkActiveWorkout());
+  }
+
+  Future<void> _checkActiveWorkout() async {
+    final saved = await store.loadActiveWorkout();
+    if (saved == null || !mounted) return;
+    final data = jsonDecode(saved) as Map<String, dynamic>;
+    final templateId = data['templateId'] as String? ?? '';
+
+    // 主动加载模板列表，避免竞态（reload 可能还没完成）
+    var allTemplates = List<TrainingTemplate>.from(templates);
+    if (allTemplates.isEmpty) {
+      allTemplates = await store.loadTemplates();
+    }
+    final template = allTemplates.cast<TrainingTemplate?>().firstWhere(
+      (t) => t?.id == templateId,
+      orElse: () => null,
+    );
+    if (template == null) {
+      await store.clearActiveWorkout();
+      return;
+    }
+    final tpl = template!;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('恢复训练'),
+        content: Text('检测到未完成的训练「${tpl.name}」，是否继续？'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              store.clearActiveWorkout();
+              Navigator.pop(ctx, false);
+            },
+            child: const Text('丢弃'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('恢复'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => WorkoutPage(
+            template: tpl,
+            store: store,
+            savedStateJson: saved,
+            onSaved: reload,
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> reload() async {
@@ -311,9 +368,10 @@ class _TemplateHomePageState extends State<TemplateHomePage> {
                                                   context,
                                                   MaterialPageRoute(
                                                     builder: (_) => WorkoutPage(
-                                                      template: t,
-                                                      onSaved: reload,
-                                                    ),
+                                                       template: t,
+                                                       store: store,
+                                                       onSaved: reload,
+                                                     ),
                                                   ),
                                                 );
                                               },
