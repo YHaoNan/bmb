@@ -7,9 +7,10 @@ import 'workout_page.dart';
 import 'workout_summary_page.dart';
 
 class WorkoutRecordsPage extends StatefulWidget {
-  const WorkoutRecordsPage({super.key, required this.store});
+  const WorkoutRecordsPage({super.key, required this.store, this.reloadSignal});
 
   final TemplateStore store;
+  final ValueNotifier<int>? reloadSignal;
 
   @override
   State<WorkoutRecordsPage> createState() => _WorkoutRecordsPageState();
@@ -24,6 +25,17 @@ class _WorkoutRecordsPageState extends State<WorkoutRecordsPage> {
   void initState() {
     super.initState();
     _reload();
+    widget.reloadSignal?.addListener(_onReloadSignal);
+  }
+
+  @override
+  void dispose() {
+    widget.reloadSignal?.removeListener(_onReloadSignal);
+    super.dispose();
+  }
+
+  void _onReloadSignal() {
+    if (mounted) _reload();
   }
 
   Future<void> _reload() async {
@@ -63,6 +75,7 @@ class _WorkoutRecordsPageState extends State<WorkoutRecordsPage> {
   }
 
   Future<void> _selectTemplate() async {
+    _templates = await widget.store.loadTemplates();
     if (_templates.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -216,13 +229,44 @@ class _WorkoutRecordsPageState extends State<WorkoutRecordsPage> {
   }
 
   Widget _buildSessionCard(WorkoutSession session) {
+    final isComplete = session.endTime != null;
     final dateStr =
         '${session.startTime.month}/${session.startTime.day} ${session.startTime.hour.toString().padLeft(2, '0')}:${session.startTime.minute.toString().padLeft(2, '0')}';
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: isComplete
+            ? BorderSide.none
+            : BorderSide(color: Colors.orangeAccent.withValues(alpha: 0.4)),
+      ),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
         onTap: () async {
+          if (!isComplete) {
+            // 恢复未完成训练
+            final saved = await widget.store.loadActiveWorkout();
+            if (saved == null || !context.mounted) return;
+            // 需要 template 来恢复
+            final templates = await widget.store.loadTemplates();
+            final template = templates.cast<TrainingTemplate?>().firstWhere(
+              (t) => t?.id == session.templateId,
+              orElse: () => null,
+            );
+            if (template == null || !context.mounted) return;
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => WorkoutPage(
+                  template: template,
+                  store: widget.store,
+                  savedStateJson: saved,
+                  onSaved: _reload,
+                ),
+              ),
+            );
+            return;
+          }
           final full = await widget.store.loadFullSession(session.id);
           if (!context.mounted) return;
           Navigator.push(
@@ -240,9 +284,36 @@ class _WorkoutRecordsPageState extends State<WorkoutRecordsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      session.templateName,
-                      style: const TextStyle(fontSize: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            session.templateName,
+                            style: const TextStyle(fontSize: 16),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isComplete
+                                ? Colors.green.withValues(alpha: 0.15)
+                                : Colors.orange.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            isComplete ? '已完成' : '进行中',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: isComplete
+                                  ? Colors.greenAccent
+                                  : Colors.orangeAccent,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -260,7 +331,10 @@ class _WorkoutRecordsPageState extends State<WorkoutRecordsPage> {
                 icon: const Icon(Icons.delete_outline, color: Colors.grey),
                 onPressed: () => _deleteSession(session),
               ),
-              const Icon(Icons.chevron_right, color: Colors.grey),
+              Icon(
+                isComplete ? Icons.chevron_right : Icons.play_circle_outline,
+                color: isComplete ? Colors.grey : Colors.orangeAccent,
+              ),
             ],
           ),
         ),

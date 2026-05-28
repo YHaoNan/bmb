@@ -243,7 +243,7 @@ class _ModelConfigPageState extends State<ModelConfigPage> {
               ],
             ),
             const SizedBox(height: 6),
-            const Text('换设备或重装后，从备份文件恢复全部数据',
+            const Text('备份文件保存在「下载/BMB_Backups」文件夹，重装应用后仍然保留',
                 style: TextStyle(color: Color(0xFFA6ABB2), fontSize: 13)),
             const SizedBox(height: 14),
             SizedBox(

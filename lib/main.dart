@@ -54,19 +54,29 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _index = 0;
   final TemplateStore _store = TemplateStore();
+  final ValueNotifier<int> _recordsReload = ValueNotifier<int>(0);
+
+  @override
+  void dispose() {
+    _recordsReload.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final pages = [
       const TemplateHomePage(),
-      WorkoutRecordsPage(store: _store),
+      WorkoutRecordsPage(store: _store, reloadSignal: _recordsReload),
       ModelConfigPage(store: _store),
     ];
     return Scaffold(
       body: IndexedStack(index: _index, children: pages),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (v) => setState(() => _index = v),
+        onDestinationSelected: (v) {
+          setState(() => _index = v);
+          if (v == 1) _recordsReload.value++;
+        },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.fitness_center), label: '模板'),
           NavigationDestination(

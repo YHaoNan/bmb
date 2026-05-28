@@ -149,10 +149,27 @@ class _GroupWorkout {
     return result;
   }
 
-  void addExtraSetFromActiveCard() {
+  /// 当前活跃动作已从模板消耗的组数
+  int consumedCount(String exerciseName) {
+    return sets.where((s) => s.exerciseName == exerciseName).length;
+  }
+
+  /// 当前活跃动作的模板定义组数
+  int get templateCount => activeCard.sets.length;
+
+  /// 按顺序从模板取下一组，返回 false 表示模板组已耗尽
+  bool addNextTemplateSet() {
     final card = activeCard;
-    final ts = card.sets.first;
-    sets.add(_setFromCard(card, ts));
+    final used = consumedCount(card.name);
+    if (used >= card.sets.length) return false;
+    sets.add(_setFromCard(card, card.sets[used]));
+    return true;
+  }
+
+  /// 用模板最后一组参数追加一组（超出模板时使用）
+  void addExtraSet() {
+    final card = activeCard;
+    sets.add(_setFromCard(card, card.sets.last));
   }
 
   _SetState _setFromCard(ExerciseCardData card, TrainingSet ts) {
@@ -390,15 +407,55 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
       _groups[_activeGIdx!].sets[_activeSIdx!].isComplete;
 
   void _addExtraSet(int gIdx) {
-    _groups[gIdx].addExtraSetFromActiveCard();
-    setState(() {});
-    _persistState();
+    final g = _groups[gIdx];
+    if (g.addNextTemplateSet()) {
+      setState(() {});
+      _persistState();
+    } else {
+      _promptExtraSet(gIdx);
+    }
+  }
+
+  Future<void> _promptExtraSet(int gIdx) async {
+    final g = _groups[gIdx];
+    final card = g.activeCard;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('增加组'),
+        content: Text('「${card.name}」已无待训练组，是否按最后一组参数再加一组？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('再加一组'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      g.addExtraSet();
+      setState(() {});
+      _persistState();
+    }
   }
 
   void _switchCardInGroup(int gIdx, int cardIdx) {
     final g = _groups[gIdx];
     if (cardIdx == g.activeCardIndex) return;
     g.activeCardIndex = cardIdx;
+    setState(() {});
+    _persistState();
+  }
+
+  void _deleteSet(int gIdx, int sIdx) {
+    final g = _groups[gIdx];
+    g.sets.removeAt(sIdx);
     setState(() {});
     _persistState();
   }
@@ -559,7 +616,14 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
             ),
           ],
         ),
-        body: _groups.isEmpty ? _buildEmptyState() : _buildContent(),
+        body: Column(
+          children: [
+            if (_restTimer != null) _buildRestTimerBar(),
+            Expanded(
+              child: _groups.isEmpty ? _buildEmptyState() : _buildContent(),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -858,6 +922,12 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline, size: 16),
+            color: Colors.redAccent,
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _deleteSet(gIdx, sIdx),
+          ),
           TextButton(
             onPressed: () => _startSet(gIdx, sIdx),
             style: TextButton.styleFrom(
@@ -1082,13 +1152,6 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
               ],
             ),
           ),
-          if (_restTimer != null) ...[
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: _buildRestTimer(),
-            ),
-          ],
           const SizedBox(height: 8),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
@@ -1164,6 +1227,12 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
                   ),
               ],
             ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline, size: 16),
+            color: Colors.redAccent,
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _deleteSet(gIdx, sIdx),
           ),
           TextButton(
             onPressed: () => _reopenSet(gIdx, sIdx),
@@ -1256,34 +1325,54 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildRestTimer() {
+  Widget _buildRestTimerBar() {
+    final color = _restRemaining > 20
+        ? const Color(0xFFB7FF00)
+        : _restRemaining > 10
+            ? Colors.orangeAccent
+            : Colors.redAccent;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF25282D),
-        borderRadius: BorderRadius.circular(8),
+        color: Colors.black,
+        border: Border(
+          bottom: BorderSide(color: color.withValues(alpha: 0.3)),
+        ),
       ),
       child: Row(
         children: [
-          const Icon(Icons.timer_outlined, size: 16, color: Colors.grey),
-          const SizedBox(width: 6),
-          Text(
-            '休息: ${_restRemaining}s',
-            style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              fontFeatures: [FontFeature.tabularFigures()],
-            ),
+          Icon(Icons.timer, size: 22, color: color),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                '组间休息',
+                style: TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+              Text(
+                '$_restRemaining 秒',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: color,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
           ),
           const Spacer(),
-          TextButton(
+          TextButton.icon(
             onPressed: _skipRest,
+            icon: const Icon(Icons.skip_next, size: 18),
+            label: const Text('跳过'),
             style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              foregroundColor: Colors.grey,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
             ),
-            child: const Text('跳过', style: TextStyle(fontSize: 12)),
           ),
         ],
       ),
