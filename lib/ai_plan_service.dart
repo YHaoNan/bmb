@@ -105,6 +105,8 @@ class AIPlanService {
       for (final card in action.cards) {
         card.keyPoints = card.keyPoints.take(5).toList();
         card.commonMistakes = card.commonMistakes.take(5).toList();
+        card.primaryMuscles = card.primaryMuscles.take(3).toList();
+        card.secondaryMuscles = card.secondaryMuscles.take(3).toList();
         if (!card.isPrimary) {
           alternatives++;
         }

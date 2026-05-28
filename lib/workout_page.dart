@@ -10,8 +10,8 @@ class _SetState {
   String exerciseName;
   String groupTitle;
   bool isAlternative;
-  List<String> primaryMuscles;
-  List<String> secondaryMuscles;
+  List<MuscleGroup> primaryMuscles;
+  List<MuscleGroup> secondaryMuscles;
   double weightKg;
   int reps;
   int restSec;
@@ -32,16 +32,16 @@ class _SetState {
     required this.exerciseName,
     required this.groupTitle,
     this.isAlternative = false,
-    List<String>? primaryMuscles,
-    List<String>? secondaryMuscles,
+    List<MuscleGroup>? primaryMuscles,
+    List<MuscleGroup>? secondaryMuscles,
     required this.weightKg,
     required this.reps,
     required this.restSec,
   }) : _origWeight = weightKg,
-        _origReps = reps,
-        _origRest = restSec,
-        primaryMuscles = primaryMuscles ?? [],
-        secondaryMuscles = secondaryMuscles ?? [];
+       _origReps = reps,
+       _origRest = restSec,
+       primaryMuscles = primaryMuscles ?? [],
+       secondaryMuscles = secondaryMuscles ?? [];
 
   ExerciseRecord toRecord() {
     final rec = ExerciseRecord(
@@ -63,8 +63,8 @@ class _SetState {
     'exerciseName': exerciseName,
     'groupTitle': groupTitle,
     'isAlternative': isAlternative,
-    'primaryMuscles': primaryMuscles,
-    'secondaryMuscles': secondaryMuscles,
+    'primaryMuscles': primaryMuscles.map((m) => m.name).toList(),
+    'secondaryMuscles': secondaryMuscles.map((m) => m.name).toList(),
     'weightKg': weightKg,
     'reps': reps,
     'restSec': restSec,
@@ -83,8 +83,14 @@ class _SetState {
       exerciseName: json['exerciseName'] as String,
       groupTitle: json['groupTitle'] as String,
       isAlternative: json['isAlternative'] as bool? ?? false,
-      primaryMuscles: (json['primaryMuscles'] as List<dynamic>?)?.cast<String>() ?? [],
-      secondaryMuscles: (json['secondaryMuscles'] as List<dynamic>?)?.cast<String>() ?? [],
+      primaryMuscles: (json['primaryMuscles'] as List<dynamic>? ?? [])
+          .map((e) => MuscleGroup.tryParse(e.toString()))
+          .whereType<MuscleGroup>()
+          .toList(),
+      secondaryMuscles: (json['secondaryMuscles'] as List<dynamic>? ?? [])
+          .map((e) => MuscleGroup.tryParse(e.toString()))
+          .whereType<MuscleGroup>()
+          .toList(),
       weightKg: (json['weightKg'] as num).toDouble(),
       reps: json['reps'] as int,
       restSec: json['restSec'] as int,
@@ -184,7 +190,13 @@ class _GroupWorkout {
 }
 
 class WorkoutPage extends StatefulWidget {
-  const WorkoutPage({super.key, required this.template, required this.store, required this.onSaved, this.savedStateJson});
+  const WorkoutPage({
+    super.key,
+    required this.template,
+    required this.store,
+    required this.onSaved,
+    this.savedStateJson,
+  });
 
   final TrainingTemplate template;
   final TemplateStore store;
@@ -225,17 +237,20 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
       _startTime = DateTime.now();
       _id = DateTime.now().microsecondsSinceEpoch.toString();
       for (final action in widget.template.actions) {
-        _groups.add(_GroupWorkout(
-          groupTitle: action.groupTitle,
-          cards: List.from(action.cards),
-        ));
+        _groups.add(
+          _GroupWorkout(
+            groupTitle: action.groupTitle,
+            cards: List.from(action.cards),
+          ),
+        );
       }
     }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
       _persistState();
     }
   }
@@ -346,8 +361,9 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
     s.reps = r;
     s.restSec = rest;
     s.feeling = _pendingFeeling;
-    s.compensation =
-        _compensationCtrl.text.isNotEmpty ? _compensationCtrl.text : null;
+    s.compensation = _compensationCtrl.text.isNotEmpty
+        ? _compensationCtrl.text
+        : null;
     s.notes = _notesCtrl.text.isNotEmpty ? _notesCtrl.text : null;
     s.isComplete = true;
     s.editing = false;
@@ -392,7 +408,8 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
     g.cards.removeAt(cardIdx);
     if (cardIdx < g.activeCardIndex) {
       g.activeCardIndex--;
-    } else if (cardIdx == g.activeCardIndex && g.activeCardIndex >= g.cards.length) {
+    } else if (cardIdx == g.activeCardIndex &&
+        g.activeCardIndex >= g.cards.length) {
       g.activeCardIndex = g.cards.length - 1;
     }
     if (g.cards.isEmpty) {
@@ -527,15 +544,18 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
                 child: Text(
                   _elapsedText,
                   style: const TextStyle(
-                      fontSize: 18,
-                      fontFeatures: [FontFeature.tabularFigures()]),
+                    fontSize: 18,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
                 ),
               ),
             ),
             TextButton(
               onPressed: _finishWorkout,
-              child: const Text('结束',
-                  style: TextStyle(color: Colors.redAccent)),
+              child: const Text(
+                '结束',
+                style: TextStyle(color: Colors.redAccent),
+              ),
             ),
           ],
         ),
@@ -546,8 +566,10 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
 
   Widget _buildEmptyState() {
     return const Center(
-      child: Text('模板中没有动作组',
-          style: TextStyle(fontSize: 16, color: Colors.grey)),
+      child: Text(
+        '模板中没有动作组',
+        style: TextStyle(fontSize: 16, color: Colors.grey),
+      ),
     );
   }
 
@@ -571,7 +593,9 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
-          color: allDone ? Colors.green.withValues(alpha: 0.4) : Colors.transparent,
+          color: allDone
+              ? Colors.green.withValues(alpha: 0.4)
+              : Colors.transparent,
           width: 1.5,
         ),
       ),
@@ -586,28 +610,41 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
               child: Row(
                 children: [
                   Icon(
-                    g.groupCollapsed ? Icons.keyboard_arrow_right : Icons.keyboard_arrow_down,
-                    size: 20, color: Colors.grey,
+                    g.groupCollapsed
+                        ? Icons.keyboard_arrow_right
+                        : Icons.keyboard_arrow_down,
+                    size: 20,
+                    color: Colors.grey,
                   ),
                   const SizedBox(width: 4),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(g.groupTitle,
-                            style: const TextStyle(
-                                fontSize: 17, fontWeight: FontWeight.w700)),
+                        Text(
+                          g.groupTitle,
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                         if (!g.groupCollapsed)
                           Text(
                             '$completed/$total 组 · ${g.activeCard.name}',
-                            style: const TextStyle(fontSize: 12, color: Colors.grey),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey,
+                            ),
                           ),
                       ],
                     ),
                   ),
                   if (total > 0)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         color: completed == total
                             ? Colors.green.withValues(alpha: 0.15)
@@ -619,7 +656,9 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: completed == total ? Colors.greenAccent : Colors.grey,
+                          color: completed == total
+                              ? Colors.greenAccent
+                              : Colors.grey,
                         ),
                       ),
                     ),
@@ -644,10 +683,10 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
                   child: OutlinedButton.icon(
                     onPressed: () => _addExtraSet(gIdx),
                     icon: const Icon(Icons.add, size: 16),
-                    label: const Text('增加一组',
-                        style: TextStyle(fontSize: 13)),
+                    label: const Text('增加一组', style: TextStyle(fontSize: 13)),
                     style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 8)),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
                   ),
                 ),
             ],
@@ -659,13 +698,15 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
 
   /// 显示组内所有动作的主肌群（去重）
   Widget _buildAllMusclesRow(_GroupWorkout g) {
-    final all = <String>{};
+    final all = <MuscleGroup>{};
     for (final c in g.cards) {
       all.addAll(c.primaryMuscles);
     }
     if (all.isEmpty) return const SizedBox.shrink();
-    return Text('主肌群: ${all.join(" · ")}',
-        style: const TextStyle(fontSize: 12, color: Colors.grey));
+    return Text(
+      '主肌群: ${all.map((m) => m.displayName).join(" · ")}',
+      style: const TextStyle(fontSize: 12, color: Colors.grey),
+    );
   }
 
   /// 可展开的组内动作列表
@@ -680,9 +721,7 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
             child: Row(
               children: [
                 Icon(
-                  g.actionsExpanded
-                      ? Icons.expand_less
-                      : Icons.expand_more,
+                  g.actionsExpanded ? Icons.expand_less : Icons.expand_more,
                   size: 18,
                   color: Colors.grey,
                 ),
@@ -690,9 +729,10 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
                 Text(
                   '组内动作 (${g.cards.length}个)',
                   style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey,
-                      fontWeight: FontWeight.w500),
+                    fontSize: 12,
+                    color: Colors.grey,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ],
             ),
@@ -726,9 +766,11 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
                         ),
                         if (c.primaryMuscles.isNotEmpty)
                           Text(
-                            '主: ${c.primaryMuscles.join("·")}',
+                            '主: ${c.primaryMuscles.map((m) => m.displayName).join("·")}',
                             style: const TextStyle(
-                                fontSize: 10, color: Colors.grey),
+                              fontSize: 10,
+                              color: Colors.grey,
+                            ),
                           ),
                       ],
                     ),
@@ -772,8 +814,10 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
           return Padding(
             padding: const EdgeInsets.only(right: 6),
             child: FilterChip(
-              label: Text('${c.name} ${stats.done}/${stats.planned}',
-                  style: const TextStyle(fontSize: 12)),
+              label: Text(
+                '${c.name} ${stats.done}/${stats.planned}',
+                style: const TextStyle(fontSize: 12),
+              ),
               selected: selected,
               onSelected: (_) => _switchCardInGroup(gIdx, i),
               visualDensity: VisualDensity.compact,
@@ -817,9 +861,10 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
           TextButton(
             onPressed: () => _startSet(gIdx, sIdx),
             style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
             child: const Text('开始', style: TextStyle(fontSize: 12)),
           ),
         ],
@@ -837,7 +882,14 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
             if (!card.isPrimary)
               const Padding(
                 padding: EdgeInsets.only(left: 8),
-                child: Text('(平替)', style: TextStyle(fontSize: 13, color: Colors.grey, fontWeight: FontWeight.normal)),
+                child: Text(
+                  '(平替)',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey,
+                    fontWeight: FontWeight.normal,
+                  ),
+                ),
               ),
           ],
         ),
@@ -847,56 +899,85 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
             mainAxisSize: MainAxisSize.min,
             children: [
               if (card.keyPoints.isNotEmpty) ...[
-                const Text('核心要领', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                const Text(
+                  '核心要领',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                ),
                 const SizedBox(height: 6),
-                ...card.keyPoints.map((p) => Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('• ', style: TextStyle(fontSize: 13)),
-                      Expanded(child: Text(p, style: const TextStyle(fontSize: 13))),
-                    ],
+                ...card.keyPoints.map(
+                  (p) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('• ', style: TextStyle(fontSize: 13)),
+                        Expanded(
+                          child: Text(p, style: const TextStyle(fontSize: 13)),
+                        ),
+                      ],
+                    ),
                   ),
-                )),
+                ),
               ],
               if (card.commonMistakes.isNotEmpty) ...[
                 const SizedBox(height: 16),
-                const Text('常见错误', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                const Text(
+                  '常见错误',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                ),
                 const SizedBox(height: 6),
-                ...card.commonMistakes.map((m) => Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('✗ ', style: TextStyle(fontSize: 13, color: Colors.redAccent)),
-                      Expanded(child: Text(m, style: const TextStyle(fontSize: 13))),
-                    ],
+                ...card.commonMistakes.map(
+                  (m) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '✗ ',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.redAccent,
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(m, style: const TextStyle(fontSize: 13)),
+                        ),
+                      ],
+                    ),
                   ),
-                )),
+                ),
               ],
               if (card.keyPoints.isEmpty && card.commonMistakes.isEmpty)
-                const Text('暂无教程信息', style: TextStyle(fontSize: 13, color: Colors.grey)),
+                const Text(
+                  '暂无教程信息',
+                  style: TextStyle(fontSize: 13, color: Colors.grey),
+                ),
             ],
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('关闭')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildEditingSet(_GroupWorkout g, _SetState s, int gIdx, int sIdx) {
-    final card = g.cards.firstWhere((c) => c.name == s.exerciseName,
-        orElse: () => g.activeCard);
+    final card = g.cards.firstWhere(
+      (c) => c.name == s.exerciseName,
+      orElse: () => g.activeCard,
+    );
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
         color: const Color(0xFF1B1F22),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-            color: const Color(0xFFB7FF00).withValues(alpha: 0.4)),
+          color: const Color(0xFFB7FF00).withValues(alpha: 0.4),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -905,16 +986,21 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
             padding: const EdgeInsets.fromLTRB(12, 10, 4, 0),
             child: Row(
               children: [
-                _setIndexBadge(
-                    '${sIdx + 1}', const Color(0xFFB7FF00)),
+                _setIndexBadge('${sIdx + 1}', const Color(0xFFB7FF00)),
                 const SizedBox(width: 8),
-                Text(s.exerciseName,
-                    style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w600)),
+                Text(
+                  s.exerciseName,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(width: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 6, vertical: 2),
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFFB7FF00).withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(8),
@@ -922,7 +1008,9 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
                   child: Text(
                     s.isComplete ? '编辑中' : '进行中',
                     style: const TextStyle(
-                        fontSize: 10, color: Color(0xFFB7FF00)),
+                      fontSize: 10,
+                      color: Color(0xFFB7FF00),
+                    ),
                   ),
                 ),
                 const Spacer(),
@@ -968,7 +1056,9 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
                       isDense: true,
                       border: OutlineInputBorder(),
                       contentPadding: EdgeInsets.symmetric(
-                          vertical: 6, horizontal: 8),
+                        vertical: 6,
+                        horizontal: 8,
+                      ),
                     ),
                   ),
                 ),
@@ -983,7 +1073,9 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
                       isDense: true,
                       border: OutlineInputBorder(),
                       contentPadding: EdgeInsets.symmetric(
-                          vertical: 6, horizontal: 8),
+                        vertical: 6,
+                        horizontal: 8,
+                      ),
                     ),
                   ),
                 ),
@@ -1044,18 +1136,28 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
                     child: Row(
                       children: [
                         if (s.feeling != null) ...[
-                          Text(s.feeling!.emoji,
-                              style: const TextStyle(fontSize: 14)),
+                          Text(
+                            s.feeling!.emoji,
+                            style: const TextStyle(fontSize: 14),
+                          ),
                           const SizedBox(width: 2),
-                          Text(s.feeling!.label,
-                              style: const TextStyle(
-                                  fontSize: 10, color: Colors.grey)),
+                          Text(
+                            s.feeling!.label,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey,
+                            ),
+                          ),
                         ],
                         if (s.compensation != null) ...[
                           const SizedBox(width: 6),
-                          Text('代: ${s.compensation}',
-                              style: const TextStyle(
-                                  fontSize: 10, color: Colors.orangeAccent)),
+                          Text(
+                            '代: ${s.compensation}',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: Colors.orangeAccent,
+                            ),
+                          ),
                         ],
                       ],
                     ),
@@ -1066,9 +1168,10 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
           TextButton(
             onPressed: () => _reopenSet(gIdx, sIdx),
             style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
             child: const Text('编辑', style: TextStyle(fontSize: 11)),
           ),
         ],
@@ -1087,11 +1190,14 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
         color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Text(text,
-          style: TextStyle(
-              fontWeight: FontWeight.w700,
-              fontSize: 12,
-              color: color)),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontWeight: FontWeight.w700,
+          fontSize: 12,
+          color: color,
+        ),
+      ),
     );
   }
 
@@ -1099,9 +1205,10 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('训练感受（可选）',
-            style:
-                TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+        const Text(
+          '训练感受（可选）',
+          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+        ),
         const SizedBox(height: 6),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -1112,7 +1219,9 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 150),
                 padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 4),
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: selected
                       ? const Color(0xFFB7FF00).withValues(alpha: 0.2)
@@ -1130,12 +1239,13 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
                   children: [
                     Text(f.emoji, style: const TextStyle(fontSize: 20)),
                     const SizedBox(width: 4),
-                    Text(f.label,
-                        style: TextStyle(
-                            fontSize: 11,
-                            color: selected
-                                ? const Color(0xFFB7FF00)
-                                : Colors.grey)),
+                    Text(
+                      f.label,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: selected ? const Color(0xFFB7FF00) : Colors.grey,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1160,17 +1270,19 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
           Text(
             '休息: ${_restRemaining}s',
             style: const TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                fontFeatures: [FontFeature.tabularFigures()]),
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
           ),
           const Spacer(),
           TextButton(
             onPressed: _skipRest,
             style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
             child: const Text('跳过', style: TextStyle(fontSize: 12)),
           ),
         ],
@@ -1178,8 +1290,7 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _miniField(String label, TextEditingController ctrl,
-      {int flex = 1}) {
+  Widget _miniField(String label, TextEditingController ctrl, {int flex = 1}) {
     return Expanded(
       flex: flex,
       child: TextField(
@@ -1192,8 +1303,10 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
           labelStyle: const TextStyle(fontSize: 10),
           border: const OutlineInputBorder(),
           isDense: true,
-          contentPadding:
-              const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+          contentPadding: const EdgeInsets.symmetric(
+            vertical: 6,
+            horizontal: 4,
+          ),
         ),
       ),
     );

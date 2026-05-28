@@ -16,8 +16,8 @@
           "name": "动作名",
           "isPrimary": true,
           "sets": [{"weightKg": 0, "reps": 0, "restSec": 0}],
-          "primaryMuscles": ["主肌群"],
-          "secondaryMuscles": ["辅助肌群"],
+          "primaryMuscles": ["主肌群枚举值"],
+          "secondaryMuscles": ["辅助肌群枚举值"],
           "keyPoints": ["核心要领"],
           "commonMistakes": ["常见错误"]
         }
@@ -26,8 +26,17 @@
   ]
 }
 
-2) 每个动作组 cards 里必须有且仅有 1 个主动作（isPrimary=true），平替动作数量 <= 3。
-3) 每个动作（主动作和平替动作）都必须有至少 1 组 sets；restSec >= 0，reps > 0，weightKg >= 0。
-4) 每个动作的 keyPoints 不超过 5 条；commonMistakes 不超过 5 条。
-5) 动作内容要与用户能力、用户意图匹配，避免不合理超强度。
-6) 所有文本使用简体中文。
+2) primaryMuscles 和 secondaryMuscles 的值必须严格从以下列表中选取：
+   腹直肌、腹斜肌、腹横肌、竖脊肌、
+   上胸、中胸、下胸、胸小肌、
+   背阔肌、斜方肌中束、斜方肌下束、菱形肌、大圆肌/小圆肌、
+   三角肌前束、三角肌中束、三角肌后束、斜方肌上束、
+   肱二头肌、肱三头肌、前臂肌群、
+   股四头肌、腘绳肌、内收肌群、臀部、
+   腓肠肌、比目鱼肌
+
+3) 每个动作组 cards 里必须有且仅有 1 个主动作（isPrimary=true），平替动作数量 <= 3。
+4) 每个动作（主动作和平替动作）都必须有至少 1 组 sets；restSec >= 0，reps > 0，weightKg >= 0。
+5) 每个动作的 keyPoints 不超过 5 条；commonMistakes 不超过 5 条。
+6) 动作内容要与用户能力、用户意图匹配，避免不合理超强度。
+7) 所有文本使用简体中文。

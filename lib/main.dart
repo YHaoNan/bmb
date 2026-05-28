@@ -368,10 +368,10 @@ class _TemplateHomePageState extends State<TemplateHomePage> {
                                                   context,
                                                   MaterialPageRoute(
                                                     builder: (_) => WorkoutPage(
-                                                       template: t,
-                                                       store: store,
-                                                       onSaved: reload,
-                                                     ),
+                                                      template: t,
+                                                      store: store,
+                                                      onSaved: reload,
+                                                    ),
                                                   ),
                                                 );
                                               },
@@ -1025,8 +1025,11 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
                                         ),
                                       ),
                                     ),
-                                    Icon(Icons.edit, size: 14,
-                                        color: Colors.grey.shade600),
+                                    Icon(
+                                      Icons.edit,
+                                      size: 14,
+                                      color: Colors.grey.shade600,
+                                    ),
                                   ],
                                 ),
                               ),
@@ -1174,8 +1177,11 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
                               onTap: () => _editGroupTitle(action),
                               child: Row(
                                 children: [
-                                  const Icon(Icons.folder_outlined,
-                                      size: 18, color: Colors.grey),
+                                  const Icon(
+                                    Icons.folder_outlined,
+                                    size: 18,
+                                    color: Colors.grey,
+                                  ),
                                   const SizedBox(width: 6),
                                   Expanded(
                                     child: Text(
@@ -1187,8 +1193,11 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
-                                  Icon(Icons.edit, size: 14,
-                                      color: Colors.grey.shade600),
+                                  Icon(
+                                    Icons.edit,
+                                    size: 14,
+                                    color: Colors.grey.shade600,
+                                  ),
                                 ],
                               ),
                             ),
@@ -1237,82 +1246,169 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
   }
 
   Future<void> _editActionDetails(ExerciseCardData card) async {
-    final primaryController = TextEditingController(
-      text: card.primaryMuscles.join('、'),
-    );
-    final secondaryController = TextEditingController(
-      text: card.secondaryMuscles.join('、'),
-    );
     final keyPointsController = TextEditingController(
       text: card.keyPoints.join('\n'),
     );
     final mistakesController = TextEditingController(
       text: card.commonMistakes.join('\n'),
     );
+    var selectedPrimary = Set<MuscleGroup>.from(card.primaryMuscles);
+    var selectedSecondary = Set<MuscleGroup>.from(card.secondaryMuscles);
 
     final saved = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: Text('${card.name} 动作详情'),
-        content: SizedBox(
-          width: 420,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: primaryController,
-                  decoration: const InputDecoration(labelText: '主肌群（用、分隔）'),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: secondaryController,
-                  decoration: const InputDecoration(labelText: '辅助肌群（用、分隔）'),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: keyPointsController,
-                  maxLines: 5,
-                  decoration: const InputDecoration(
-                    labelText: '核心要领（每行一条，最多5条）',
+      builder: (_) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('${card.name} 动作详情'),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '主肌群',
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                   ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: mistakesController,
-                  maxLines: 5,
-                  decoration: const InputDecoration(
-                    labelText: '常见错误（每行一条，最多5条）',
+                  const SizedBox(height: 6),
+                  ...BodyRegion.values.map((region) {
+                    final muscles = MuscleGroup.values
+                        .where((m) => m.region == region)
+                        .toList();
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            region.displayName,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 4,
+                            runSpacing: 4,
+                            children: muscles
+                                .map(
+                                  (m) => FilterChip(
+                                    label: Text(
+                                      m.displayName,
+                                      style: const TextStyle(fontSize: 11),
+                                    ),
+                                    selected: selectedPrimary.contains(m),
+                                    onSelected: (v) => setDialogState(() {
+                                      if (v) {
+                                        selectedPrimary.add(m);
+                                        selectedSecondary.remove(m);
+                                      } else
+                                        selectedPrimary.remove(m);
+                                    }),
+                                    visualDensity: VisualDensity.compact,
+                                    selectedColor: const Color(
+                                      0xFFB7FF00,
+                                    ).withValues(alpha: 0.2),
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                  const Divider(),
+                  const Text(
+                    '辅助肌群',
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 6),
+                  ...BodyRegion.values.map((region) {
+                    final muscles = MuscleGroup.values
+                        .where((m) => m.region == region)
+                        .toList();
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            region.displayName,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 4,
+                            runSpacing: 4,
+                            children: muscles
+                                .map(
+                                  (m) => FilterChip(
+                                    label: Text(
+                                      m.displayName,
+                                      style: const TextStyle(fontSize: 11),
+                                    ),
+                                    selected: selectedSecondary.contains(m),
+                                    onSelected: (v) => setDialogState(() {
+                                      if (v) {
+                                        selectedSecondary.add(m);
+                                        selectedPrimary.remove(m);
+                                      } else
+                                        selectedSecondary.remove(m);
+                                    }),
+                                    visualDensity: VisualDensity.compact,
+                                    selectedColor: const Color(
+                                      0xFFB7FF00,
+                                    ).withValues(alpha: 0.2),
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                  const Divider(),
+                  TextField(
+                    controller: keyPointsController,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: '核心要领（每行一条，最多5条）',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: mistakesController,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: '常见错误（每行一条，最多5条）',
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('保存'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('保存'),
-          ),
-        ],
       ),
     );
 
     if (saved == true) {
-      card.primaryMuscles = primaryController.text
-          .split(RegExp(r'[、,，]'))
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toList();
-      card.secondaryMuscles = secondaryController.text
-          .split(RegExp(r'[、,，]'))
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toList();
+      card.primaryMuscles = selectedPrimary.toList();
+      card.secondaryMuscles = selectedSecondary.toList();
       card.keyPoints = keyPointsController.text
           .split('\n')
           .map((e) => e.trim())
@@ -1329,8 +1425,6 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
       setState(() {});
     }
 
-    primaryController.dispose();
-    secondaryController.dispose();
     keyPointsController.dispose();
     mistakesController.dispose();
   }
@@ -1345,18 +1439,7 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
     final selectedAbilities = <String>{};
     final selectedPreferences = <String>{};
 
-    const bodyParts = [
-      '胸',
-      '背',
-      '肩',
-      '肱二头肌',
-      '肱三头肌',
-      '腹肌',
-      '臀',
-      '股四头肌',
-      '腘绳肌',
-      '小腿',
-    ];
+    final bodyParts = BodyRegion.values;
     const abilities = ['菜鸟', '小登', '中登', '老登'];
     const preferences = ['固定器械', '哑铃', '徒手'];
 
@@ -1429,7 +1512,7 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
                   child: chipRow(
                     bodyParts,
                     selectedParts,
-                    (p) => p,
+                    (p) => (p as BodyRegion).displayName,
                     setDialogState: setDialogState,
                   ),
                 ),
