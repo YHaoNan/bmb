@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'models.dart';
 import 'template_store.dart';
@@ -714,7 +715,7 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
+      builder: (_) => const _AiThinkingAnimation(),
     );
     try {
       final generated = await _aiPlanService.generatePlan(
@@ -1585,4 +1586,160 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
       dialogIntentController.dispose();
     });
   }
+}
+
+class _AiThinkingAnimation extends StatefulWidget {
+  const _AiThinkingAnimation();
+
+  @override
+  State<_AiThinkingAnimation> createState() => _AiThinkingAnimationState();
+}
+
+class _AiThinkingAnimationState extends State<_AiThinkingAnimation>
+    with TickerProviderStateMixin {
+  late final AnimationController _pulseController;
+  late final AnimationController _rotateController;
+  late final AnimationController _dotController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat();
+    _rotateController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3000),
+    )..repeat();
+    _dotController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    _rotateController.dispose();
+    _dotController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const neon = Color(0xFFB7FF00);
+    return PopScope(
+      canPop: false,
+      child: Dialog(
+        backgroundColor: const Color(0xFF1A1D20),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 100,
+                height: 100,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    AnimatedBuilder(
+                      animation: _pulseController,
+                      builder: (context, child) {
+                        final v = _pulseController.value;
+                        return Container(
+                          width: 70 + v * 20,
+                          height: 70 + v * 20,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: neon.withValues(alpha: 0.35 - v * 0.35),
+                              width: 1.5,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    AnimatedBuilder(
+                      animation: _rotateController,
+                      builder: (context, child) {
+                        return Transform.rotate(
+                          angle: _rotateController.value * 2 * pi,
+                          child: CustomPaint(
+                            size: const Size(60, 60),
+                            painter: _OrbitPainter(
+                              progress: _rotateController.value,
+                              color: neon,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: neon.withValues(alpha: 0.15),
+                      ),
+                      child: const Icon(
+                        Icons.psychology,
+                        color: neon,
+                        size: 24,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              AnimatedBuilder(
+                animation: _dotController,
+                builder: (context, child) {
+                  final dots = '.' * ((_dotController.value * 3).floor() % 4);
+                  return Text(
+                    'AI 正在分析$dots',
+                    style: const TextStyle(
+                      color: Color(0xFF9CA3AF),
+                      fontSize: 13,
+                      letterSpacing: 0.5,
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OrbitPainter extends CustomPainter {
+  final double progress;
+  final Color color;
+
+  _OrbitPainter({required this.progress, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2;
+
+    // 画3个粒子
+    for (int i = 0; i < 3; i++) {
+      final angle = progress * 2 * 3.14159 + (i * 2 * 3.14159 / 3);
+      final x = center.dx + radius * 0.7 * cos(angle);
+      final y = center.dy + radius * 0.7 * sin(angle);
+      final paint = Paint()
+        ..color = color.withValues(alpha: 0.8 - i * 0.2)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
+      canvas.drawCircle(Offset(x, y), 3.0 - i * 0.5, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _OrbitPainter oldDelegate) =>
+      oldDelegate.progress != progress;
 }

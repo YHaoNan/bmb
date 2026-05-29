@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'models.dart';
 import 'template_store.dart';
 import 'workout_models.dart';
-import 'ai_plan_service.dart';
 
 class _SetState {
   String exerciseName;
@@ -162,7 +161,29 @@ class _GroupWorkout {
     final card = activeCard;
     final used = consumedCount(card.name);
     if (used >= card.sets.length) return false;
-    sets.add(_setFromCard(card, card.sets[used]));
+
+    // 若用户自定义了上一组的任意参数（偏离模板），则复制上一组参数
+    final lastForCard = sets.lastWhere(
+      (s) => s.exerciseName == card.name,
+      orElse: () => _setFromCard(card, card.sets[used]),
+    );
+    final ts = card.sets[used];
+    if (lastForCard.weightKg != ts.weightKg ||
+        lastForCard.reps != ts.reps ||
+        lastForCard.restSec != ts.restSec) {
+      sets.add(_SetState(
+        exerciseName: card.name,
+        groupTitle: groupTitle,
+        isAlternative: !card.isPrimary,
+        primaryMuscles: card.primaryMuscles,
+        secondaryMuscles: card.secondaryMuscles,
+        weightKg: lastForCard.weightKg,
+        reps: lastForCard.reps,
+        restSec: lastForCard.restSec,
+      ));
+    } else {
+      sets.add(_setFromCard(card, ts));
+    }
     return true;
   }
 
@@ -469,9 +490,6 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
         g.activeCardIndex >= g.cards.length) {
       g.activeCardIndex = g.cards.length - 1;
     }
-    if (g.cards.isEmpty) {
-      _groups.removeAt(gIdx);
-    }
     setState(() {});
     _persistState();
   }
@@ -492,7 +510,7 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
     );
 
     if (!mounted) return;
-    final confirmed = await showDialog<bool>(
+    final result = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('结束训练'),
@@ -506,57 +524,65 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
+            onPressed: () => Navigator.pop(ctx, 'cancel'),
             child: const Text('取消'),
           ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'discard'),
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            child: const Text('丢弃'),
+          ),
           FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
+            onPressed: () => Navigator.pop(ctx, 'save'),
             child: const Text('保存并结束'),
           ),
         ],
       ),
     );
-    if (confirmed == true && mounted) {
+    if (result == 'save' && mounted) {
       await widget.store.saveWorkoutSession(session);
       widget.store.clearActiveWorkout();
 
-      // AI 评估（后台执行，不阻塞返回）
-      if (mounted) {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (_) => const Center(
-            child: Card(
-              margin: EdgeInsets.all(40),
-              child: Padding(
-                padding: EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(),
-                    SizedBox(height: 16),
-                    Text('正在生成AI评估…'),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      }
+      // TODO: AI 评估暂时取消
+      // if (mounted) {
+      //   showDialog(
+      //     context: context,
+      //     barrierDismissible: false,
+      //     builder: (_) => const Center(
+      //       child: Card(
+      //         margin: EdgeInsets.all(40),
+      //         child: Padding(
+      //           padding: EdgeInsets.all(24),
+      //           child: Column(
+      //             mainAxisSize: MainAxisSize.min,
+      //             children: [
+      //               CircularProgressIndicator(),
+      //               SizedBox(height: 16),
+      //               Text('正在生成AI评估…'),
+      //             ],
+      //           ),
+      //         ),
+      //       ),
+      //     ),
+      //   );
+      // }
 
-      final aiService = AIPlanService(store: widget.store);
-      try {
-        final summary = await aiService.evaluateWorkout(session);
-        if (mounted) Navigator.pop(context); // 关掉 loading
-        session.aiSummary = summary;
-        await widget.store.saveWorkoutSession(session);
-      } catch (e) {
-        debugPrint('[finishWorkout] AI评估失败: $e');
-        if (mounted) Navigator.pop(context); // 关掉 loading
-      }
+      // final aiService = AIPlanService(store: widget.store);
+      // try {
+      //   final summary = await aiService.evaluateWorkout(session);
+      //   if (mounted) Navigator.pop(context); // 关掉 loading
+      //   session.aiSummary = summary;
+      //   await widget.store.saveWorkoutSession(session);
+      // } catch (e) {
+      //   debugPrint('[finishWorkout] AI评估失败: $e');
+      //   if (mounted) Navigator.pop(context); // 关掉 loading
+      // }
 
       widget.onSaved();
       if (mounted) Navigator.pop(context);
+    } else if (result == 'discard' && mounted) {
+      widget.store.clearActiveWorkout();
+      Navigator.pop(context);
     }
   }
 
@@ -918,7 +944,10 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
           Expanded(
             child: Text(
               '${s.exerciseName}  ${s.weightKg.toStringAsFixed(0)}kg × ${s.reps}次',
-              style: const TextStyle(fontSize: 13),
+              style: const TextStyle(
+                fontSize: 13,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -1098,9 +1127,19 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
             child: Row(
               children: [
-                _miniField('重量(kg)', _weightCtrl, flex: 2),
+                _adjustableField(
+                  label: '重量(kg)',
+                  ctrl: _weightCtrl,
+                  step: 5,
+                  isInt: false,
+                ),
                 const SizedBox(width: 6),
-                _miniField('次数', _repsCtrl, flex: 1),
+                _adjustableField(
+                  label: '次数',
+                  ctrl: _repsCtrl,
+                  step: 1,
+                  isInt: true,
+                ),
                 const SizedBox(width: 6),
                 _miniField('休息(秒)', _restCtrl, flex: 1),
               ],
@@ -1189,7 +1228,11 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
               children: [
                 Text(
                   '${s.exerciseName}  ${s.weightKg.toStringAsFixed(0)}kg × ${s.reps}次',
-                  style: const TextStyle(fontSize: 13),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
                 if (s.feeling != null ||
                     s.compensation != null ||
@@ -1237,11 +1280,11 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
           TextButton(
             onPressed: () => _reopenSet(gIdx, sIdx),
             style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
               minimumSize: Size.zero,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-            child: const Text('编辑', style: TextStyle(fontSize: 11)),
+            child: const Text('编辑', style: TextStyle(fontSize: 12)),
           ),
         ],
       ),
@@ -1397,6 +1440,50 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
             horizontal: 4,
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _adjustableField({
+    required String label,
+    required TextEditingController ctrl,
+    required double step,
+    required bool isInt,
+  }) {
+    return Expanded(
+      flex: 2,
+      child: Row(
+        children: [
+          InkWell(
+            onTap: () {
+              final cur = isInt
+                  ? (int.tryParse(ctrl.text) ?? 0)
+                  : (double.tryParse(ctrl.text) ?? 0);
+              final next = cur - step;
+              ctrl.text = isInt ? next.toInt().toString() : next.toStringAsFixed(0);
+            },
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 2),
+              child: Icon(Icons.remove_circle_outline, size: 18),
+            ),
+          ),
+          Expanded(
+            child: _miniField(label, ctrl),
+          ),
+          InkWell(
+            onTap: () {
+              final cur = isInt
+                  ? (int.tryParse(ctrl.text) ?? 0)
+                  : (double.tryParse(ctrl.text) ?? 0);
+              final next = cur + step;
+              ctrl.text = isInt ? next.toInt().toString() : next.toStringAsFixed(0);
+            },
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 2),
+              child: Icon(Icons.add_circle_outline, size: 18),
+            ),
+          ),
+        ],
       ),
     );
   }
