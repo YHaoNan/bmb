@@ -1,17 +1,23 @@
-# bmb_app
+# BMB 大肌霸
 
-A new Flutter project.
+![bmb_icon](./ic_launcher.png)
 
-## Getting Started
+你的私人AI教练。
 
-This project is a starting point for a Flutter application.
+# 🔥 核心亮点
 
-A few resources to get you started if this is your first Flutter project:
+- 🤖 计划制定、训练评价、计划修缮，全链路AI集成
+- 💪 平替动作、要领/常见错误生成、悬浮窗休息计时等，满满巧思
+- 🔒 纯本地，不上传任何数据到服务器
+- 🤑 完全免费，你可以使用任何OpenAI兼容的模型提供商
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+# 🧑‍💻 TodoList
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+- 肌群图像化代替当前的文字，让用户一眼可以看清发力位置
+- 教程页快速跳转到小红书、抖音、B站等app，并自动搜索相关动作
+- 给健身教练跪下，求持续帮我优化Prompts和流程
+
+
+# 👀 其它
+
+AI生成不能保证100%准确（你的健身教练也不能），请依据个人情况做具体训练计划。
