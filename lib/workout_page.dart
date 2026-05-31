@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'ai_plan_service.dart';
 import 'models.dart';
 import 'template_store.dart';
 import 'workout_models.dart';
+import 'workout_state_manager.dart';
+import 'workout_summary_page.dart';
 
 class _SetState {
   String exerciseName;
@@ -171,16 +174,18 @@ class _GroupWorkout {
     if (lastForCard.weightKg != ts.weightKg ||
         lastForCard.reps != ts.reps ||
         lastForCard.restSec != ts.restSec) {
-      sets.add(_SetState(
-        exerciseName: card.name,
-        groupTitle: groupTitle,
-        isAlternative: !card.isPrimary,
-        primaryMuscles: card.primaryMuscles,
-        secondaryMuscles: card.secondaryMuscles,
-        weightKg: lastForCard.weightKg,
-        reps: lastForCard.reps,
-        restSec: lastForCard.restSec,
-      ));
+      sets.add(
+        _SetState(
+          exerciseName: card.name,
+          groupTitle: groupTitle,
+          isAlternative: !card.isPrimary,
+          primaryMuscles: card.primaryMuscles,
+          secondaryMuscles: card.secondaryMuscles,
+          weightKg: lastForCard.weightKg,
+          reps: lastForCard.reps,
+          restSec: lastForCard.restSec,
+        ),
+      );
     } else {
       sets.add(_setFromCard(card, ts));
     }
@@ -253,9 +258,8 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
   final List<_GroupWorkout> _groups = [];
   int? _activeGIdx;
   int? _activeSIdx;
-
-  int _restRemaining = 0;
-  Timer? _restTimer;
+  bool _appInBackground = false;
+  bool _keepFloatingOnIdle = false;
 
   final _weightCtrl = TextEditingController();
   final _repsCtrl = TextEditingController();
@@ -269,6 +273,28 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
+
+    final mgr = WorkoutStateManager.instance;
+    mgr.onStateChanged = _onWorkoutStateChanged;
+    mgr.onRestTick = () {
+      if (!mounted) return;
+      setState(() {});
+      if (mgr.state == WorkoutState.resting) {
+        WorkoutChannel.updateNotification(
+          state: 'resting',
+          title: mgr.title,
+          text: mgr.message,
+          remainingSeconds: mgr.restRemainingSeconds,
+          totalSeconds: mgr.restTotalSeconds,
+        );
+        WorkoutChannel.updateFloatingTimer(
+          remainingSeconds: mgr.restRemainingSeconds,
+          totalSeconds: mgr.restTotalSeconds,
+        );
+      }
+    };
+    mgr.onRestComplete = _onRestComplete;
+
     if (widget.savedStateJson != null) {
       _restoreFromJson(widget.savedStateJson!);
     } else {
@@ -285,11 +311,74 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
     }
   }
 
+  void _onWorkoutStateChanged() {
+    final mgr = WorkoutStateManager.instance;
+    switch (mgr.state) {
+      case WorkoutState.exercising:
+        WorkoutChannel.updateNotification(
+          state: 'exercising',
+          title: mgr.title,
+          text: mgr.exercisingBody,
+        );
+        WorkoutChannel.hideFloatingTimer();
+      case WorkoutState.resting:
+        WorkoutChannel.updateNotification(
+          state: 'resting',
+          title: mgr.title,
+          text: mgr.message,
+          remainingSeconds: mgr.restRemainingSeconds,
+          totalSeconds: mgr.restTotalSeconds,
+        );
+        if (_appInBackground) {
+          WorkoutChannel.showFloatingTimer(
+            remainingSeconds: mgr.restRemainingSeconds,
+            totalSeconds: mgr.restTotalSeconds,
+          );
+        }
+      case WorkoutState.idle:
+        WorkoutChannel.updateNotification(
+          state: 'idle',
+          title: mgr.title,
+          text: mgr.message,
+        );
+        if (!_keepFloatingOnIdle) {
+          WorkoutChannel.hideFloatingTimer();
+        }
+        _keepFloatingOnIdle = false;
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _onRestComplete() {
+    WorkoutChannel.triggerVibration();
+    WorkoutChannel.showFloatingRestDone();
+    WorkoutChannel.updateNotification(
+      state: 'idle',
+      title: WorkoutStateManager.instance.title,
+      text: WorkoutStateManager.instance.message,
+    );
+    _keepFloatingOnIdle = true;
+    if (mounted) setState(() {});
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
       _persistState();
+    }
+    if (state == AppLifecycleState.paused) {
+      _appInBackground = true;
+      if (WorkoutStateManager.instance.state == WorkoutState.resting) {
+        final mgr = WorkoutStateManager.instance;
+        WorkoutChannel.showFloatingTimer(
+          remainingSeconds: mgr.restRemainingSeconds,
+          totalSeconds: mgr.restTotalSeconds,
+        );
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      _appInBackground = false;
+      WorkoutChannel.hideFloatingTimer();
     }
   }
 
@@ -297,7 +386,9 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
-    _restTimer?.cancel();
+    WorkoutStateManager.instance.reset();
+    WorkoutChannel.stopService();
+    WorkoutChannel.hideFloatingTimer();
     _weightCtrl.dispose();
     _repsCtrl.dispose();
     _restCtrl.dispose();
@@ -321,25 +412,8 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
     return g.sets[_activeSIdx!];
   }
 
-  void _restartRestTimer(int sec) {
-    _restTimer?.cancel();
-    _restRemaining = sec;
-    if (sec <= 0) return;
-    _restTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (_restRemaining > 0) {
-        setState(() => _restRemaining--);
-      } else {
-        _restTimer?.cancel();
-        _restTimer = null;
-        setState(() {});
-      }
-    });
-  }
-
   void _skipRest() {
-    _restTimer?.cancel();
-    _restTimer = null;
-    _restRemaining = 0;
+    WorkoutStateManager.instance.skipRest();
     setState(() {});
   }
 
@@ -378,13 +452,34 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
     widget.store.saveActiveWorkout(_serializeState());
   }
 
-  void _startSet(int gIdx, int sIdx) {
-    _skipRest();
+  Future<void> _startSet(int gIdx, int sIdx) async {
+    final mgr = WorkoutStateManager.instance;
+    if (!mgr.canStartSet()) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('请先完成当前正在训练的组')));
+      return;
+    }
+    mgr.skipRest();
     final s = _groups[gIdx].sets[sIdx];
     _activeGIdx = gIdx;
     _activeSIdx = sIdx;
     s.editing = true;
     _loadCtrlsFromSet(s);
+    if (mgr.state == WorkoutState.idle) {
+      final ok = await WorkoutChannel.startService();
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('需要通知权限才能显示运动状态')));
+      }
+    }
+    mgr.startSet(
+      groupTitle: s.groupTitle,
+      cardName: s.exerciseName,
+      setIndex: sIdx,
+      plannedSets: _groups[gIdx].templateCount,
+    );
     setState(() {});
     _persistState();
   }
@@ -406,18 +501,25 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
     s.isComplete = true;
     s.editing = false;
 
-    _restartRestTimer(s.restSec);
+    WorkoutStateManager.instance.completeSet(restSeconds: s.restSec);
     setState(() {});
     _persistState();
   }
 
   void _reopenSet(int gIdx, int sIdx) {
-    _skipRest();
+    final mgr = WorkoutStateManager.instance;
+    mgr.skipRest();
     final s = _groups[gIdx].sets[sIdx];
     _activeGIdx = gIdx;
     _activeSIdx = sIdx;
     s.editing = true;
     _loadCtrlsFromSet(s);
+    mgr.startSet(
+      groupTitle: s.groupTitle,
+      cardName: s.exerciseName,
+      setIndex: sIdx,
+      plannedSets: _groups[gIdx].templateCount,
+    );
     setState(() {});
     _persistState();
   }
@@ -543,44 +645,132 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
       await widget.store.saveWorkoutSession(session);
       widget.store.clearActiveWorkout();
 
-      // TODO: AI 评估暂时取消
-      // if (mounted) {
-      //   showDialog(
-      //     context: context,
-      //     barrierDismissible: false,
-      //     builder: (_) => const Center(
-      //       child: Card(
-      //         margin: EdgeInsets.all(40),
-      //         child: Padding(
-      //           padding: EdgeInsets.all(24),
-      //           child: Column(
-      //             mainAxisSize: MainAxisSize.min,
-      //             children: [
-      //               CircularProgressIndicator(),
-      //               SizedBox(height: 16),
-      //               Text('正在生成AI评估…'),
-      //             ],
-      //           ),
-      //         ),
-      //       ),
-      //     ),
-      //   );
-      // }
+      // 检查感受填写率，决定是否弹窗问AI总结
+      final feelingRate = completedSets.isEmpty
+          ? 0.0
+          : completedSets.where((s) => s.feeling != null).length /
+                completedSets.length;
 
-      // final aiService = AIPlanService(store: widget.store);
-      // try {
-      //   final summary = await aiService.evaluateWorkout(session);
-      //   if (mounted) Navigator.pop(context); // 关掉 loading
-      //   session.aiSummary = summary;
-      //   await widget.store.saveWorkoutSession(session);
-      // } catch (e) {
-      //   debugPrint('[finishWorkout] AI评估失败: $e');
-      //   if (mounted) Navigator.pop(context); // 关掉 loading
-      // }
+      // 查找上次同模板的训练（后续AI、对比弹窗都要用）
+      WorkoutSession? lastFull;
+      {
+        final allSessions = await widget.store.loadSessions();
+        final lastSession = allSessions
+            .where((s) => s.templateId == widget.template.id && s.id != _id)
+            .fold<WorkoutSession?>(null, (prev, s) {
+              if (prev == null || s.startTime.isAfter(prev.startTime)) return s;
+              return prev;
+            });
+        if (lastSession != null) {
+          lastFull = await widget.store.loadFullSession(lastSession.id);
+        }
+      }
 
+      if (feelingRate >= 0.8 && mounted) {
+        final wantAi = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('AI 总结'),
+            content: const Text('是否生成本次训练的 AI 总结？\n包括评分、组分析、改进建议。'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('不需要'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('生成总结'),
+              ),
+            ],
+          ),
+        );
+
+        if (wantAi == true && mounted) {
+          // loading
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => const Center(
+              child: Card(
+                margin: EdgeInsets.all(40),
+                child: Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 16),
+                      Text('AI 评估中，请稍候…'),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+
+          try {
+            final aiService = AIPlanService(store: widget.store);
+            final evaluation = await aiService.evaluateWorkout(
+              session: session,
+              template: widget.template,
+              lastSession: lastFull,
+            );
+            if (mounted) Navigator.pop(context); // 关掉loading
+            if (evaluation != null) {
+              session.aiSummary = jsonEncode({
+                'grade': evaluation.grade,
+                'summary': evaluation.summary,
+                'groups': evaluation.groups
+                    .map(
+                      (g) => {
+                        'name': g.name,
+                        'changes_enum': g.changesEnum,
+                        'changes': g.changes,
+                        'analyse': g.analyse,
+                        'suggestion': g.suggestion,
+                      },
+                    )
+                    .toList(),
+                if (evaluation.modifiedPlan != null &&
+                    evaluation.modifiedPlan!.isNotEmpty)
+                  'modified_plan': evaluation.modifiedPlan!
+                      .map((a) => a.toJson())
+                      .toList(),
+              });
+              await widget.store.saveWorkoutSession(session);
+            }
+          } catch (e, s) {
+            debugPrint('[finishWorkout] AI评估失败: $e\n$s');
+            if (mounted) Navigator.pop(context); // 关掉loading
+          }
+        }
+      }
+
+      WorkoutStateManager.instance.reset();
+      WorkoutChannel.stopService();
+      WorkoutChannel.hideFloatingTimer();
       widget.onSaved();
-      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        // 跳转到详情页
+        final full = await widget.store.loadFullSession(session.id);
+        if (mounted) {
+          Navigator.pop(context);
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => WorkoutSummaryPage(
+                session: full ?? session,
+                store: widget.store,
+                lastSession: lastFull,
+              ),
+            ),
+          );
+        }
+      }
     } else if (result == 'discard' && mounted) {
+      WorkoutStateManager.instance.reset();
+      WorkoutChannel.stopService();
+      WorkoutChannel.hideFloatingTimer();
       widget.store.clearActiveWorkout();
       Navigator.pop(context);
     }
@@ -644,7 +834,8 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
         ),
         body: Column(
           children: [
-            if (_restTimer != null) _buildRestTimerBar(),
+            if (WorkoutStateManager.instance.state == WorkoutState.resting)
+              _buildRestTimerBar(),
             Expanded(
               child: _groups.isEmpty ? _buildEmptyState() : _buildContent(),
             ),
@@ -1369,20 +1560,19 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
   }
 
   Widget _buildRestTimerBar() {
-    final color = _restRemaining > 20
+    final remaining = WorkoutStateManager.instance.restRemainingSeconds;
+    final color = remaining > 20
         ? const Color(0xFFB7FF00)
-        : _restRemaining > 10
-            ? Colors.orangeAccent
-            : Colors.redAccent;
+        : remaining > 10
+        ? Colors.orangeAccent
+        : Colors.redAccent;
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.black,
-        border: Border(
-          bottom: BorderSide(color: color.withValues(alpha: 0.3)),
-        ),
+        border: Border(bottom: BorderSide(color: color.withValues(alpha: 0.3))),
       ),
       child: Row(
         children: [
@@ -1397,7 +1587,7 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
                 style: TextStyle(fontSize: 11, color: Colors.grey),
               ),
               Text(
-                '$_restRemaining 秒',
+                '$remaining 秒',
                 style: TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
@@ -1460,23 +1650,25 @@ class _WorkoutPageState extends State<WorkoutPage> with WidgetsBindingObserver {
                   ? (int.tryParse(ctrl.text) ?? 0)
                   : (double.tryParse(ctrl.text) ?? 0);
               final next = cur - step;
-              ctrl.text = isInt ? next.toInt().toString() : next.toStringAsFixed(0);
+              ctrl.text = isInt
+                  ? next.toInt().toString()
+                  : next.toStringAsFixed(0);
             },
             child: const Padding(
               padding: EdgeInsets.symmetric(horizontal: 2),
               child: Icon(Icons.remove_circle_outline, size: 18),
             ),
           ),
-          Expanded(
-            child: _miniField(label, ctrl),
-          ),
+          Expanded(child: _miniField(label, ctrl)),
           InkWell(
             onTap: () {
               final cur = isInt
                   ? (int.tryParse(ctrl.text) ?? 0)
                   : (double.tryParse(ctrl.text) ?? 0);
               final next = cur + step;
-              ctrl.text = isInt ? next.toInt().toString() : next.toStringAsFixed(0);
+              ctrl.text = isInt
+                  ? next.toInt().toString()
+                  : next.toStringAsFixed(0);
             },
             child: const Padding(
               padding: EdgeInsets.symmetric(horizontal: 2),

@@ -80,6 +80,10 @@ class ExerciseRecord {
 
   bool get modified => weightModified || repsModified || restModified;
 
+  /// 该动作总容量 (kg × reps 之和)
+  int get volume =>
+      sets.fold(0, (sum, s) => sum + (s.weightKg * s.reps).round());
+
   Map<String, dynamic> toJson() => {
     'groupTitle': groupTitle,
     'cardName': cardName,
@@ -111,6 +115,63 @@ class ExerciseRecord {
     repsModified: json['repsModified'] as bool? ?? false,
     restModified: json['restModified'] as bool? ?? false,
   );
+}
+
+class GroupEvaluation {
+  final String? name;
+  final String? changesEnum;
+  final String? changes;
+  final String? analyse;
+  final String? suggestion;
+
+  GroupEvaluation({
+    this.name,
+    this.changesEnum,
+    this.changes,
+    this.analyse,
+    this.suggestion,
+  });
+
+  factory GroupEvaluation.fromJson(Map<String, dynamic> json) =>
+      GroupEvaluation(
+        name: json['name'] as String?,
+        changesEnum: json['changes_enum'] as String?,
+        changes: json['changes'] as String?,
+        analyse: json['analyse'] as String?,
+        suggestion: json['suggestion'] as String?,
+      );
+}
+
+class WorkoutEvaluation {
+  final String? grade;
+  final String? summary;
+  final List<GroupEvaluation> groups;
+  final List<TrainingAction>? modifiedPlan;
+
+  WorkoutEvaluation({
+    this.grade,
+    this.summary,
+    List<GroupEvaluation>? groups,
+    this.modifiedPlan,
+  }) : groups = groups ?? [];
+
+  factory WorkoutEvaluation.fromJson(Map<String, dynamic> json) =>
+      WorkoutEvaluation(
+        grade: json['grade'] as String?,
+        summary: json['summary'] as String?,
+        groups:
+            (json['groups'] as List<dynamic>?)
+                ?.map(
+                  (e) => GroupEvaluation.fromJson(e as Map<String, dynamic>),
+                )
+                .toList() ??
+            [],
+        modifiedPlan:
+            (json['modified_plan'] as List<dynamic>?)
+                ?.map((e) => TrainingAction.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            [],
+      );
 }
 
 class WorkoutSession {
@@ -151,7 +212,8 @@ class WorkoutSession {
     return '${min ~/ 60}小时${min % 60}分钟';
   }
 
-  int get completedCount => completedSets ?? exercises.where((e) => e.feeling != null).length;
+  int get completedCount =>
+      completedSets ?? exercises.where((e) => e.feeling != null).length;
 
   int get totalCount => totalSets ?? exercises.length;
 

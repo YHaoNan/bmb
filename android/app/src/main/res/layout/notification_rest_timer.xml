@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:padding="12dp">
+
+    <FrameLayout
+        android:layout_width="64dp"
+        android:layout_height="64dp">
+
+        <ProgressBar
+            android:id="@+id/circular_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:max="100"
+            android:progress="100"
+            android:progressDrawable="@drawable/circular_progress_drawable" />
+
+        <TextView
+            android:id="@+id/timer_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:textSize="20sp"
+            android:textColor="#B7FF00"
+            android:textStyle="bold"
+            android:text="60" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:layout_marginStart="12dp">
+
+        <TextView
+            android:id="@+id/rest_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:text="休息中" />
+
+        <TextView
+            android:id="@+id/rest_subtitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:textColor="#999999"
+            android:text="认真回忆动作要领吧~" />
+
+    </LinearLayout>
+
+</LinearLayout>

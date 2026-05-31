@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'template_store.dart';
+import 'workout_state_manager.dart';
 
 class ModelConfigPage extends StatefulWidget {
   const ModelConfigPage({super.key, required this.store});
@@ -18,72 +19,186 @@ class _ModelConfigPageState extends State<ModelConfigPage> {
   final _baseUrlController = TextEditingController();
   final _modelNameController = TextEditingController();
   final _apiKeyController = TextEditingController();
+  final _heightController = TextEditingController();
+  final _weightController = TextEditingController();
+  final _preferenceController = TextEditingController();
   bool _loading = true;
   bool _obscure = true;
   String _backupSize = '';
   List<FileSystemEntity> _backups = [];
 
+  String _gender = '';
+  String _experience = '';
+  bool _overlayGranted = false;
+  static const _genderOptions = ['', '男', '女'];
+  static const _experienceOptions = ['', '菜鸟', '小登', '中登', '老登'];
+  static const _toolOptions = ['固定器械', '绳索', '哑铃', '徒手'];
+  List<String> _selectedTools = [];
+
+  List<String> _parseTools(String val) {
+    if (val.isEmpty) return [];
+    return val
+        .split(RegExp(r'[、,]'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+  }
+
+  String _joinTools(List<String> list) => list.join('、');
+
   @override
   void initState() {
     super.initState();
     _load();
+    TemplateStore.reloadNotifier.addListener(_onReload);
   }
 
   @override
   void dispose() {
+    TemplateStore.reloadNotifier.removeListener(_onReload);
     _baseUrlController.dispose();
     _modelNameController.dispose();
     _apiKeyController.dispose();
+    _heightController.dispose();
+    _weightController.dispose();
+    _preferenceController.dispose();
     super.dispose();
+  }
+
+  void _onReload() {
+    if (!mounted) return;
+    _load();
   }
 
   Future<void> _load() async {
     final config = await widget.store.loadModelConfig();
+    debugPrint(
+      '[Settings] _load: userPreferTools raw="${config['userPreferTools']}"',
+    );
     _baseUrlController.text = config['baseUrl'] ?? '';
     _modelNameController.text = config['modelName'] ?? '';
     _apiKeyController.text = config['apiKey'] ?? '';
+    _gender = config['userGender'] ?? '';
+    _heightController.text = config['userHeight'] ?? '';
+    _weightController.text = config['userWeight'] ?? '';
+    _experience = config['userExperience'] ?? '';
+    _selectedTools = _parseTools(config['userPreferTools'] ?? '');
+    _preferenceController.text = config['userPreference'] ?? '';
+    debugPrint('[Settings] _load: parsed selectedTools=$_selectedTools');
     _backupSize = await widget.store.backupSizeText;
     _backups = await widget.store.listBackups();
     if (!mounted) return;
     setState(() => _loading = false);
+    _checkOverlayPermission();
   }
 
   Future<void> _reload() async {
+    final config = await widget.store.loadModelConfig();
+    _baseUrlController.text = config['baseUrl'] ?? '';
+    _modelNameController.text = config['modelName'] ?? '';
+    _apiKeyController.text = config['apiKey'] ?? '';
+    _gender = config['userGender'] ?? '';
+    _heightController.text = config['userHeight'] ?? '';
+    _weightController.text = config['userWeight'] ?? '';
+    _experience = config['userExperience'] ?? '';
+    _selectedTools = _parseTools(config['userPreferTools'] ?? '');
+    _preferenceController.text = config['userPreference'] ?? '';
     _backupSize = await widget.store.backupSizeText;
     _backups = await widget.store.listBackups();
     if (!mounted) return;
     setState(() {});
+    _checkOverlayPermission();
   }
 
   Future<void> _save() async {
+    final toolsJoined = _joinTools(_selectedTools);
+    debugPrint(
+      '[Settings] _save: experience="$_experience" tools=$_selectedTools joined="$toolsJoined"',
+    );
     await widget.store.saveModelConfig(
       baseUrl: _baseUrlController.text.trim(),
       modelName: _modelNameController.text.trim(),
       apiKey: _apiKeyController.text.trim(),
+      userGender: _gender,
+      userHeight: _heightController.text.trim(),
+      userWeight: _weightController.text.trim(),
+      userExperience: _experience,
+      userPreferTools: toolsJoined,
+      userPreference: _preferenceController.text.trim(),
     );
+    _triggerReload();
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('模型配置已保存')));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('已保存')));
+  }
+
+  void _triggerReload() {
+    TemplateStore.reloadNotifier.value++;
   }
 
   Future<void> _createBackup() async {
     try {
       final path = await widget.store.exportBackupJson();
       await _reload();
+      _triggerReload();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: const Text('备份已创建'),
-        action: SnackBarAction(
-          label: '分享',
-          onPressed: () {
-            Share.shareXFiles([XFile(path)], text: 'BMB 数据备份');
-          },
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('备份已创建'),
+          action: SnackBarAction(
+            label: '分享',
+            onPressed: () {
+              Share.shareXFiles([XFile(path)], text: 'BMB 数据备份');
+            },
+          ),
         ),
-      ));
+      );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('备份失败: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('备份失败: $e')));
+    }
+  }
+
+  Future<void> _importBackup() async {
+    try {
+      final uri = await widget.store.pickBackupFile();
+      if (uri == null) return;
+
+      final name = uri.split('/').last;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('导入数据'),
+          content: Text('将从「$name」恢复全部数据，确定继续？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('导入'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+
+      final ok = await widget.store.restoreFromJsonFile(uri);
+      await _reload();
+      _triggerReload();
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(ok ? '数据导入成功' : '导入失败')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('导入失败: $e')));
     }
   }
 
@@ -102,11 +217,13 @@ class _ModelConfigPageState extends State<ModelConfigPage> {
         content: Text('将从「$name」恢复全部数据，确定继续？'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('恢复')),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('恢复'),
+          ),
         ],
       ),
     );
@@ -114,10 +231,11 @@ class _ModelConfigPageState extends State<ModelConfigPage> {
 
     final ok = await widget.store.restoreFromJsonFile(path);
     await _reload();
+    _triggerReload();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(ok ? '数据恢复成功' : '恢复失败'),
-    ));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(ok ? '数据恢复成功' : '恢复失败')));
   }
 
   Future<void> _deleteBackup(FileSystemEntity file) async {
@@ -131,8 +249,9 @@ class _ModelConfigPageState extends State<ModelConfigPage> {
         content: Text('确定删除「$name」？'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
             onPressed: () => Navigator.pop(ctx, true),
@@ -145,6 +264,142 @@ class _ModelConfigPageState extends State<ModelConfigPage> {
 
     await widget.store.deleteBackup(path);
     await _reload();
+    _triggerReload();
+  }
+
+  Future<void> _checkOverlayPermission() async {
+    final granted = await WorkoutChannel.checkOverlayPermission();
+    if (mounted) setState(() => _overlayGranted = granted);
+  }
+
+  Future<void> _toggleOverlayPermission() async {
+    if (_overlayGranted) return;
+    await WorkoutChannel.requestOverlayPermission();
+    // Check again after returning from settings
+    await Future.delayed(const Duration(milliseconds: 500));
+    await _checkOverlayPermission();
+  }
+
+  // ─── 用户信息卡片 ───
+
+  Widget _buildUserInfoCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '个人信息',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'AI 生成计划时将参考这些信息',
+              style: TextStyle(color: Color(0xFFA6ABB2)),
+            ),
+            const SizedBox(height: 14),
+            DropdownButtonFormField<String>(
+              value: _genderOptions.contains(_gender) ? _gender : null,
+              decoration: const InputDecoration(labelText: '性别'),
+              items: _genderOptions
+                  .map(
+                    (e) => DropdownMenuItem(
+                      value: e,
+                      child: Text(e.isEmpty ? '未设置' : e),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (v) => setState(() => _gender = v ?? ''),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _heightController,
+                    decoration: const InputDecoration(
+                      labelText: '身高 (cm)',
+                      hintText: '175',
+                    ),
+                    keyboardType: TextInputType.number,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _weightController,
+                    decoration: const InputDecoration(
+                      labelText: '体重 (kg)',
+                      hintText: '70',
+                    ),
+                    keyboardType: TextInputType.number,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              '健身经验',
+              style: TextStyle(fontSize: 13, color: Color(0xFFA6ABB2)),
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: _experienceOptions.where((e) => e.isNotEmpty).map((
+                opt,
+              ) {
+                final selected = _experience == opt;
+                return FilterChip(
+                  label: Text(opt, style: const TextStyle(fontSize: 12)),
+                  selected: selected,
+                  onSelected: (v) => setState(() => _experience = v ? opt : ''),
+                  selectedColor: const Color(0xFFB7FF00).withValues(alpha: 0.2),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              '偏好工具',
+              style: TextStyle(fontSize: 13, color: Color(0xFFA6ABB2)),
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: _toolOptions.map((tool) {
+                final selected = _selectedTools.contains(tool);
+                return FilterChip(
+                  label: Text(tool, style: const TextStyle(fontSize: 12)),
+                  selected: selected,
+                  onSelected: (v) {
+                    setState(() {
+                      _selectedTools = [..._selectedTools];
+                      if (v) {
+                        _selectedTools.add(tool);
+                      } else {
+                        _selectedTools.remove(tool);
+                      }
+                    });
+                  },
+                  selectedColor: const Color(0xFFB7FF00).withValues(alpha: 0.2),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _save,
+                icon: const Icon(Icons.save_outlined),
+                label: const Text('保存'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -155,11 +410,66 @@ class _ModelConfigPageState extends State<ModelConfigPage> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                _buildUserInfoCard(),
+                const SizedBox(height: 12),
+                _buildPreferenceCard(),
+                const SizedBox(height: 12),
                 _buildModelConfigCard(),
                 const SizedBox(height: 12),
                 _buildBackupCard(),
+                const SizedBox(height: 12),
+                _buildOverlayPermissionCard(),
               ],
             ),
+    );
+  }
+
+  // ─── 偏好卡片 ───
+
+  Widget _buildPreferenceCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '训练偏好',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              '以文字描述你的训练偏好，会注入到 AI 评估和计划生成中',
+              style: TextStyle(color: Color(0xFFA6ABB2), fontSize: 13),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              '示例：偏好推拉循环；固定器械重量跳步为5kg；哑铃重量跳步为2kg',
+              style: TextStyle(color: Color(0xFF666666), fontSize: 11),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _preferenceController,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                hintText: '在此输入你的训练偏好…',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.all(12),
+              ),
+              style: const TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _save,
+                icon: const Icon(Icons.save, size: 16),
+                label: const Text('保存偏好'),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -172,12 +482,15 @@ class _ModelConfigPageState extends State<ModelConfigPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('模型配置',
-                style:
-                    TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+            const Text(
+              '模型配置',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 6),
-            const Text('配置 OpenAI 兼容模型连接参数',
-                style: TextStyle(color: Color(0xFFA6ABB2))),
+            const Text(
+              '配置 OpenAI 兼容模型连接参数',
+              style: TextStyle(color: Color(0xFFA6ABB2)),
+            ),
             const SizedBox(height: 14),
             TextField(
               controller: _baseUrlController,
@@ -202,7 +515,9 @@ class _ModelConfigPageState extends State<ModelConfigPage> {
                 labelText: 'API Key',
                 suffixIcon: IconButton(
                   onPressed: () => setState(() => _obscure = !_obscure),
-                  icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility),
+                  icon: Icon(
+                    _obscure ? Icons.visibility_off : Icons.visibility,
+                  ),
                 ),
               ),
             ),
@@ -232,19 +547,23 @@ class _ModelConfigPageState extends State<ModelConfigPage> {
           children: [
             Row(
               children: [
-                const Text('数据管理',
-                    style:
-                        TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                const Text(
+                  '数据管理',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                ),
                 const Spacer(),
                 if (_backupSize.isNotEmpty)
-                  Text(_backupSize,
-                      style:
-                          const TextStyle(fontSize: 12, color: Colors.grey)),
+                  Text(
+                    _backupSize,
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
               ],
             ),
             const SizedBox(height: 6),
-            const Text('备份文件保存在「下载/BMB_Backups」文件夹，重装应用后仍然保留',
-                style: TextStyle(color: Color(0xFFA6ABB2), fontSize: 13)),
+            const Text(
+              '备份文件保存在「下载/BMB_Backups」文件夹，重装应用后仍然保留',
+              style: TextStyle(color: Color(0xFFA6ABB2), fontSize: 13),
+            ),
             const SizedBox(height: 14),
             SizedBox(
               width: double.infinity,
@@ -252,6 +571,15 @@ class _ModelConfigPageState extends State<ModelConfigPage> {
                 onPressed: _createBackup,
                 icon: const Icon(Icons.backup_outlined, size: 18),
                 label: const Text('新建备份'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _importBackup,
+                icon: const Icon(Icons.file_open_outlined, size: 18),
+                label: const Text('导入备份'),
               ),
             ),
             if (_backups.isNotEmpty) ...[
@@ -266,6 +594,49 @@ class _ModelConfigPageState extends State<ModelConfigPage> {
     );
   }
 
+  Widget _buildOverlayPermissionCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '悬浮窗权限',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              '休息时在桌面上方显示倒计时',
+              style: TextStyle(color: Color(0xFFA6ABB2), fontSize: 13),
+            ),
+            const SizedBox(height: 14),
+            SwitchListTile(
+              value: _overlayGranted,
+              onChanged: (_) => _toggleOverlayPermission(),
+              title: Text(
+                _overlayGranted ? '已授权' : '未授权',
+                style: TextStyle(
+                  color: _overlayGranted
+                      ? const Color(0xFFB7FF00)
+                      : Colors.grey,
+                ),
+              ),
+              secondary: Icon(
+                _overlayGranted
+                    ? Icons.check_circle_outline
+                    : Icons.warning_amber_outlined,
+                color: _overlayGranted
+                    ? const Color(0xFFB7FF00)
+                    : Colors.orangeAccent,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildBackupItem(File file) {
     final path = file.path;
     final name = path.split('\\').last.split('/').last;
@@ -274,8 +645,8 @@ class _ModelConfigPageState extends State<ModelConfigPage> {
     final sizeText = size < 1024
         ? '$size B'
         : size < 1024 * 1024
-            ? '${(size / 1024).toStringAsFixed(1)} KB'
-            : '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
+        ? '${(size / 1024).toStringAsFixed(1)} KB'
+        : '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
     final dateStr =
         '${modified.month}/${modified.day} ${modified.hour.toString().padLeft(2, '0')}:${modified.minute.toString().padLeft(2, '0')}';
 
@@ -296,8 +667,10 @@ class _ModelConfigPageState extends State<ModelConfigPage> {
               children: [
                 Text(name, style: const TextStyle(fontSize: 12)),
                 const SizedBox(height: 2),
-                Text('$dateStr · $sizeText',
-                    style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                Text(
+                  '$dateStr · $sizeText',
+                  style: const TextStyle(fontSize: 11, color: Colors.grey),
+                ),
               ],
             ),
           ),

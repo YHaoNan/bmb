@@ -13,7 +13,8 @@ import 'workout_models.dart';
 class TemplateStore {
   static Database? _db;
   static const _dbName = 'bmb_data.db';
-  static const _dbVersion = 2;
+  static final reloadNotifier = ValueNotifier<int>(0);
+  static const _dbVersion = 3;
 
   Future<Database> get _database async {
     if (_db != null && _db!.isOpen) return _db!;
@@ -68,7 +69,8 @@ class TemplateStore {
         template_name TEXT,
         start_time TEXT NOT NULL,
         end_time TEXT,
-        ai_summary TEXT
+        ai_summary TEXT,
+        deleted_at TEXT
       )
     ''');
     await db.execute('''
@@ -110,8 +112,11 @@ class TemplateStore {
     final db = await _database;
     final rows = await db.query('templates');
     return rows
-        .map((r) =>
-            TrainingTemplate.fromJson(jsonDecode(r['data'] as String) as Map<String, dynamic>))
+        .map(
+          (r) => TrainingTemplate.fromJson(
+            jsonDecode(r['data'] as String) as Map<String, dynamic>,
+          ),
+        )
         .toList();
   }
 
@@ -150,16 +155,16 @@ class TemplateStore {
     final rows = await db.query('draft', where: 'id = 1');
     if (rows.isEmpty) return null;
     return TemplateDraft.fromJson(
-        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>);
+      jsonDecode(rows.first['data'] as String) as Map<String, dynamic>,
+    );
   }
 
   Future<void> saveDraft(TemplateDraft draft) async {
     final db = await _database;
-    await db.insert(
-      'draft',
-      {'id': 1, 'data': jsonEncode(draft.toJson())},
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('draft', {
+      'id': 1,
+      'data': jsonEncode(draft.toJson()),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> clearDraft() async {
@@ -169,17 +174,34 @@ class TemplateStore {
 
   // ─── Model Config ───
 
-  Future<Map<String, String>> loadModelConfig() async {
+  Future<Map<String, dynamic>> loadModelConfig() async {
     final db = await _database;
     final rows = await db.query('model_config', where: 'id = 1');
     if (rows.isEmpty) {
-      return {'baseUrl': '', 'modelName': '', 'apiKey': ''};
+      return {
+        'baseUrl': '',
+        'modelName': '',
+        'apiKey': '',
+        'userGender': '',
+        'userHeight': '',
+        'userWeight': '',
+        'userExperience': '',
+        'userPreferTools': '',
+        'userPreference': '',
+      };
     }
-    final data = jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
+    final data =
+        jsonDecode(rows.first['data'] as String) as Map<String, dynamic>;
     return {
       'baseUrl': data['baseUrl']?.toString() ?? '',
       'modelName': data['modelName']?.toString() ?? '',
       'apiKey': data['apiKey']?.toString() ?? '',
+      'userGender': data['userGender']?.toString() ?? '',
+      'userHeight': data['userHeight']?.toString() ?? '',
+      'userWeight': data['userWeight']?.toString() ?? '',
+      'userExperience': data['userExperience']?.toString() ?? '',
+      'userPreferTools': data['userPreferTools']?.toString() ?? '',
+      'userPreference': data['userPreference']?.toString() ?? '',
     };
   }
 
@@ -187,73 +209,104 @@ class TemplateStore {
     required String baseUrl,
     required String modelName,
     required String apiKey,
+    String userGender = '',
+    String userHeight = '',
+    String userWeight = '',
+    String userExperience = '',
+    String userPreferTools = '',
+    String userPreference = '',
   }) async {
     final db = await _database;
-    await db.insert(
-      'model_config',
-      {
-        'id': 1,
-        'data': jsonEncode({
-          'baseUrl': baseUrl,
-          'modelName': modelName,
-          'apiKey': apiKey,
-        }),
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('model_config', {
+      'id': 1,
+      'data': jsonEncode({
+        'baseUrl': baseUrl,
+        'modelName': modelName,
+        'apiKey': apiKey,
+        'userGender': userGender,
+        'userHeight': userHeight,
+        'userWeight': userWeight,
+        'userExperience': userExperience,
+        'userPreferTools': userPreferTools,
+        'userPreference': userPreference,
+      }),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   // ─── Workouts (relational) ───
 
   Future<List<WorkoutSession>> loadSessions() async {
     final db = await _database;
-    // 用子查询一次性带出每组 session 的 set 数和有感觉得 set 数
     final rows = await db.rawQuery('''
       SELECT ws.*,
-        (SELECT COUNT(*) FROM workout_sets WHERE session_id = ws.id) AS set_count,
-        (SELECT COUNT(*) FROM workout_sets WHERE session_id = ws.id AND feeling IS NOT NULL) AS feeling_count
+        (SELECT COUNT(*) FROM workout_sets WHERE session_id = ws.id) AS set_count
       FROM workout_sessions ws
+      WHERE ws.deleted_at IS NULL
       ORDER BY ws.start_time DESC
     ''');
-    return rows.map((r) => WorkoutSession(
-      id: r['id'] as String,
-      startTime: DateTime.parse(r['start_time'] as String),
-      endTime: r['end_time'] != null ? DateTime.parse(r['end_time'] as String) : null,
-      templateId: r['template_id'] as String? ?? '',
-      templateName: r['template_name'] as String? ?? '',
-      totalSets: r['set_count'] as int?,
-      completedSets: r['feeling_count'] as int?,
-      aiSummary: r['ai_summary'] as String?,
-    )).toList();
+    return rows
+        .map(
+          (r) => WorkoutSession(
+            id: r['id'] as String,
+            startTime: DateTime.parse(r['start_time'] as String),
+            endTime: r['end_time'] != null
+                ? DateTime.parse(r['end_time'] as String)
+                : null,
+            templateId: r['template_id'] as String? ?? '',
+            templateName: r['template_name'] as String? ?? '',
+            totalSets: r['set_count'] as int?,
+            completedSets: r['set_count'] as int?,
+            aiSummary: r['ai_summary'] as String?,
+          ),
+        )
+        .toList();
   }
 
   Future<WorkoutSession?> loadFullSession(String sessionId) async {
     final db = await _database;
-    final rows = await db.query('workout_sessions', where: 'id = ?', whereArgs: [sessionId]);
+    final rows = await db.query(
+      'workout_sessions',
+      where: 'id = ?',
+      whereArgs: [sessionId],
+    );
     if (rows.isEmpty) return null;
     final r = rows.first;
-    final sets = await db.query('workout_sets',
-        where: 'session_id = ?', whereArgs: [sessionId], orderBy: 'set_index');
-    final exercises = sets.map((s) => ExerciseRecord(
-      groupTitle: s['group_title'] as String? ?? '',
-      cardName: s['card_name'] as String? ?? '',
-      isAlternative: (s['is_alternative'] as int?) == 1,
-      weightModified: (s['weight_modified'] as int?) == 1,
-      repsModified: (s['reps_modified'] as int?) == 1,
-      restModified: (s['rest_modified'] as int?) == 1,
-      feeling: s['feeling'] != null ? Feeling.values.byName(s['feeling'] as String) : null,
-      compensation: s['compensation'] as String?,
-      notes: s['notes'] as String?,
-      sets: [SetRecord(
-        weightKg: (s['weight_kg'] as num?)?.toDouble() ?? 0,
-        reps: (s['reps'] as int?) ?? 0,
-        restSec: (s['rest_sec'] as int?) ?? 0,
-      )],
-    )).toList();
+    final sets = await db.query(
+      'workout_sets',
+      where: 'session_id = ?',
+      whereArgs: [sessionId],
+      orderBy: 'set_index',
+    );
+    final exercises = sets
+        .map(
+          (s) => ExerciseRecord(
+            groupTitle: s['group_title'] as String? ?? '',
+            cardName: s['card_name'] as String? ?? '',
+            isAlternative: (s['is_alternative'] as int?) == 1,
+            weightModified: (s['weight_modified'] as int?) == 1,
+            repsModified: (s['reps_modified'] as int?) == 1,
+            restModified: (s['rest_modified'] as int?) == 1,
+            feeling: s['feeling'] != null
+                ? Feeling.values.byName(s['feeling'] as String)
+                : null,
+            compensation: s['compensation'] as String?,
+            notes: s['notes'] as String?,
+            sets: [
+              SetRecord(
+                weightKg: (s['weight_kg'] as num?)?.toDouble() ?? 0,
+                reps: (s['reps'] as int?) ?? 0,
+                restSec: (s['rest_sec'] as int?) ?? 0,
+              ),
+            ],
+          ),
+        )
+        .toList();
     return WorkoutSession(
       id: r['id'] as String,
       startTime: DateTime.parse(r['start_time'] as String),
-      endTime: r['end_time'] != null ? DateTime.parse(r['end_time'] as String) : null,
+      endTime: r['end_time'] != null
+          ? DateTime.parse(r['end_time'] as String)
+          : null,
       templateId: r['template_id'] as String? ?? '',
       templateName: r['template_name'] as String? ?? '',
       aiSummary: r['ai_summary'] as String?,
@@ -273,7 +326,11 @@ class TemplateStore {
         'end_time': session.endTime?.toIso8601String(),
         'ai_summary': session.aiSummary,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
-      await txn.delete('workout_sets', where: 'session_id = ?', whereArgs: [session.id]);
+      await txn.delete(
+        'workout_sets',
+        where: 'session_id = ?',
+        whereArgs: [session.id],
+      );
       final batch = txn.batch();
       for (int i = 0; i < session.exercises.length; i++) {
         final e = session.exercises[i];
@@ -304,8 +361,12 @@ class TemplateStore {
 
   Future<void> deleteSession(String sessionId) async {
     final db = await _database;
-    await db.delete('workout_sets', where: 'session_id = ?', whereArgs: [sessionId]);
-    await db.delete('workout_sessions', where: 'id = ?', whereArgs: [sessionId]);
+    await db.update(
+      'workout_sessions',
+      {'deleted_at': DateTime.now().toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [sessionId],
+    );
   }
 
   // ─── Active Workout ───
@@ -323,18 +384,19 @@ class TemplateStore {
   /// 兼容旧 DB 文件缺失 ai_summary 列的情况
   Future<void> _ensureAiSummaryColumn(Database db) async {
     try {
-      await db.execute('ALTER TABLE workout_sessions ADD COLUMN ai_summary TEXT');
+      await db.execute(
+        'ALTER TABLE workout_sessions ADD COLUMN ai_summary TEXT',
+      );
     } catch (_) {}
   }
 
   Future<void> saveActiveWorkout(String json) async {
     final db = await _database;
     await _ensureActiveWorkoutTable(db);
-    await db.insert(
-      'active_workout',
-      {'id': 1, 'data': json},
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('active_workout', {
+      'id': 1,
+      'data': json,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<String?> loadActiveWorkout() async {
@@ -385,14 +447,16 @@ class TemplateStore {
   Future<String> exportBackupJson() async {
     final db = await _database;
 
-    final templates = (await db.query('templates'))
-        .map((r) => jsonDecode(r['data'] as String))
-        .toList();
-    final folders =
-        (await db.query('folders')).map((r) => r['name'] as String).toList();
+    final templates = (await db.query(
+      'templates',
+    )).map((r) => jsonDecode(r['data'] as String)).toList();
+    final folders = (await db.query(
+      'folders',
+    )).map((r) => r['name'] as String).toList();
     final draftRows = await db.query('draft', where: 'id = 1');
-    final draft =
-        draftRows.isNotEmpty ? jsonDecode(draftRows.first['data'] as String) : null;
+    final draft = draftRows.isNotEmpty
+        ? jsonDecode(draftRows.first['data'] as String)
+        : null;
     final configRows = await db.query('model_config', where: 'id = 1');
     final modelConfig = configRows.isNotEmpty
         ? jsonDecode(configRows.first['data'] as String)
@@ -400,13 +464,16 @@ class TemplateStore {
     final sessions = await db.query('workout_sessions');
     final sessionIds = sessions.map((r) => r['id'] as String).toList();
     final allSets = sessionIds.isNotEmpty
-        ? await db.query('workout_sets',
+        ? await db.query(
+            'workout_sets',
             where: 'session_id IN (${sessionIds.map((_) => '?').join(',')})',
-            whereArgs: sessionIds)
+            whereArgs: sessionIds,
+          )
         : <Map<String, dynamic>>[];
 
     final now = DateTime.now();
-    final ts = '${now.year}${_pad(now.month)}${_pad(now.day)}_${_pad(now.hour)}${_pad(now.minute)}${_pad(now.second)}';
+    final ts =
+        '${now.year}${_pad(now.month)}${_pad(now.day)}_${_pad(now.hour)}${_pad(now.minute)}${_pad(now.second)}';
     final fileName = '$_backupPrefix$ts.json';
     final jsonStr = jsonEncode({
       'version': 2,
@@ -427,13 +494,17 @@ class TemplateStore {
     privateFile.writeAsStringSync(jsonStr);
     final privatePath = privateFile.path;
 
-    debugPrint('[exportBackupJson] privatePath=$privatePath size=${jsonStr.length}');
+    debugPrint(
+      '[exportBackupJson] privatePath=$privatePath size=${jsonStr.length}',
+    );
     debugPrint('[exportBackupJson] platform=$defaultTargetPlatform');
 
     // 尝试写入公共 Download 目录
     try {
       if (defaultTargetPlatform == TargetPlatform.android) {
-        debugPrint('[exportBackupJson] invoking saveToDownloads fileName=$fileName');
+        debugPrint(
+          '[exportBackupJson] invoking saveToDownloads fileName=$fileName',
+        );
         await _platformChannel.invokeMethod('saveToDownloads', {
           'sourcePath': privatePath,
           'fileName': fileName,
@@ -486,7 +557,8 @@ class TemplateStore {
     }
     unique.sort((a, b) {
       return (b as File).lastModifiedSync().compareTo(
-          (a as File).lastModifiedSync());
+        (a as File).lastModifiedSync(),
+      );
     });
     debugPrint('[listBackups] unique count=${unique.length}');
     return unique;
@@ -495,7 +567,9 @@ class TemplateStore {
   Future<List<FileSystemEntity>> _listBackupsFrom(String dirPath) async {
     try {
       final dir = Directory(dirPath);
-      debugPrint('[_listBackupsFrom] dirPath=$dirPath exists=${dir.existsSync()}');
+      debugPrint(
+        '[_listBackupsFrom] dirPath=$dirPath exists=${dir.existsSync()}',
+      );
       if (!dir.existsSync()) {
         debugPrint('[_listBackupsFrom] directory does not exist');
         return [];
@@ -526,12 +600,20 @@ class TemplateStore {
     // 1) 直接尝试读文件系统路径（部分设备允许）
     debugPrint('[_listAndroidPublicBackups] step1: direct path scan');
     try {
-      final dir = Directory('/storage/emulated/0/Download/$_publicBackupDirName');
+      final dir = Directory(
+        '/storage/emulated/0/Download/$_publicBackupDirName',
+      );
       final exists = dir.existsSync();
       debugPrint('[_listAndroidPublicBackups] dir exists=$exists');
       if (exists) {
         for (final f in dir.listSync()) {
-          if (f is File && f.path.split('\\').last.split('/').last.startsWith(_backupPrefix)) {
+          if (f is File &&
+              f.path
+                  .split('\\')
+                  .last
+                  .split('/')
+                  .last
+                  .startsWith(_backupPrefix)) {
             final name = f.path.split('\\').last.split('/').last;
             final localPath = '$privateDir/$name';
             if (!File(localPath).existsSync()) {
@@ -550,9 +632,10 @@ class TemplateStore {
     // 2) 兜底：MediaStore 查询
     debugPrint('[_listAndroidPublicBackups] step2: MediaStore query');
     try {
-      final result = await _platformChannel.invokeMethod<List<dynamic>>('listDownloads', {
-        'prefix': _backupPrefix,
-      });
+      final result = await _platformChannel.invokeMethod<List<dynamic>>(
+        'listDownloads',
+        {'prefix': _backupPrefix},
+      );
       debugPrint('[_listAndroidPublicBackups] step2 result=$result');
       if (result == null || result.isEmpty) {
         debugPrint('[_listAndroidPublicBackups] step2 no results');
@@ -562,15 +645,24 @@ class TemplateStore {
         final map = item as Map<String, dynamic>;
         final uri = map['uri'] as String;
         final name = map['name'] as String;
-        debugPrint('[_listAndroidPublicBackups] step2 item uri=$uri name=$name');
+        debugPrint(
+          '[_listAndroidPublicBackups] step2 item uri=$uri name=$name',
+        );
         final localPath = '$privateDir/$name';
         if (File(localPath).existsSync()) {
-          debugPrint('[_listAndroidPublicBackups] already exists locally: $name');
+          debugPrint(
+            '[_listAndroidPublicBackups] already exists locally: $name',
+          );
           copied.add(File(localPath));
           continue;
         }
-        final content = await _platformChannel.invokeMethod<String>('readFile', {'uri': uri});
-        debugPrint('[_listAndroidPublicBackups] step2 readFile len=${content?.length}');
+        final content = await _platformChannel.invokeMethod<String>(
+          'readFile',
+          {'uri': uri},
+        );
+        debugPrint(
+          '[_listAndroidPublicBackups] step2 readFile len=${content?.length}',
+        );
         if (content != null && content.isNotEmpty) {
           File(localPath).writeAsStringSync(content);
           copied.add(File(localPath));
@@ -579,7 +671,9 @@ class TemplateStore {
     } catch (e) {
       debugPrint('[_listAndroidPublicBackups] step2 error: $e');
     }
-    debugPrint('[_listAndroidPublicBackups] final copied count=${copied.length}');
+    debugPrint(
+      '[_listAndroidPublicBackups] final copied count=${copied.length}',
+    );
     return copied;
   }
 
@@ -589,13 +683,27 @@ class TemplateStore {
     if (file.existsSync()) await file.delete();
   }
 
+  /// 调用系统文件选择器选取备份文件。
+  /// 返回文件 URI（content://），或 null（用户取消）。
+  Future<String?> pickBackupFile() async {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return await _platformChannel.invokeMethod<String>('pickBackupFile');
+    }
+    return null;
+  }
+
   /// 从 JSON 备份文件恢复全部数据。
   /// 返回恢复是否成功。
   Future<bool> restoreFromJsonFile(String filePath) async {
     try {
       late final String raw;
-      if (filePath.startsWith('content://') && defaultTargetPlatform == TargetPlatform.android) {
-        raw = await _platformChannel.invokeMethod<String>('readFile', {'uri': filePath}) ?? '';
+      if (filePath.startsWith('content://') &&
+          defaultTargetPlatform == TargetPlatform.android) {
+        raw =
+            await _platformChannel.invokeMethod<String>('readFile', {
+              'uri': filePath,
+            }) ??
+            '';
         if (raw.isEmpty) return false;
       } else {
         final file = File(filePath);
@@ -614,8 +722,10 @@ class TemplateStore {
       final templates = content['templates'] as List<dynamic>? ?? [];
       for (final item in templates) {
         final t = TrainingTemplate.fromJson(item as Map<String, dynamic>);
-        batch.insert('templates', {'id': t.id, 'data': jsonEncode(t.toJson())},
-            conflictAlgorithm: ConflictAlgorithm.replace);
+        batch.insert('templates', {
+          'id': t.id,
+          'data': jsonEncode(t.toJson()),
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
 
       // folders
@@ -629,16 +739,20 @@ class TemplateStore {
       batch.delete('draft');
       final draft = content['draft'];
       if (draft != null) {
-        batch.insert('draft', {'id': 1, 'data': jsonEncode(draft)},
-            conflictAlgorithm: ConflictAlgorithm.replace);
+        batch.insert('draft', {
+          'id': 1,
+          'data': jsonEncode(draft),
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
 
       // modelConfig
       batch.delete('model_config');
       final modelConfig = content['modelConfig'];
       if (modelConfig != null) {
-        batch.insert('model_config', {'id': 1, 'data': jsonEncode(modelConfig)},
-            conflictAlgorithm: ConflictAlgorithm.replace);
+        batch.insert('model_config', {
+          'id': 1,
+          'data': jsonEncode(modelConfig),
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
 
       // workout sessions (relational)
@@ -683,16 +797,22 @@ class TemplateStore {
       final sessions = content['sessions'] as List<dynamic>?;
       if (sessions != null) {
         for (final s in sessions) {
-          batch.insert('workout_sessions', s as Map<String, dynamic>,
-              conflictAlgorithm: ConflictAlgorithm.replace);
+          batch.insert(
+            'workout_sessions',
+            s as Map<String, dynamic>,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
         }
       }
       final sets = content['sets'] as List<dynamic>?;
       if (sets != null) {
         for (final s in sets) {
           final map = s as Map<String, dynamic>;
-          batch.insert('workout_sets', map,
-              conflictAlgorithm: ConflictAlgorithm.replace);
+          batch.insert(
+            'workout_sets',
+            map,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
         }
       }
 
@@ -761,8 +881,10 @@ class TemplateStore {
       final list = jsonDecode(tRaw) as List<dynamic>;
       for (final item in list) {
         final t = TrainingTemplate.fromJson(item as Map<String, dynamic>);
-        await db.insert('templates', {'id': t.id, 'data': jsonEncode(t.toJson())},
-            conflictAlgorithm: ConflictAlgorithm.replace);
+        await db.insert('templates', {
+          'id': t.id,
+          'data': jsonEncode(t.toJson()),
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
       hasData = true;
     }
@@ -771,8 +893,9 @@ class TemplateStore {
     final fRaw = prefs.getStringList('bmb_template_folders');
     if (fRaw != null && fRaw.isNotEmpty) {
       for (final f in fRaw.toSet()) {
-        await db.insert('folders', {'name': f},
-            conflictAlgorithm: ConflictAlgorithm.ignore);
+        await db.insert('folders', {
+          'name': f,
+        }, conflictAlgorithm: ConflictAlgorithm.ignore);
       }
       hasData = true;
     }
@@ -780,16 +903,20 @@ class TemplateStore {
     // draft
     final dRaw = prefs.getString('bmb_template_draft');
     if (dRaw != null && dRaw.isNotEmpty) {
-      await db.insert('draft', {'id': 1, 'data': dRaw},
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      await db.insert('draft', {
+        'id': 1,
+        'data': dRaw,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
       hasData = true;
     }
 
     // model config
     final mRaw = prefs.getString('bmb_model_config');
     if (mRaw != null && mRaw.isNotEmpty) {
-      await db.insert('model_config', {'id': 1, 'data': mRaw},
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      await db.insert('model_config', {
+        'id': 1,
+        'data': mRaw,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
       hasData = true;
     }
 
@@ -799,8 +926,10 @@ class TemplateStore {
       final list = jsonDecode(wRaw) as List<dynamic>;
       for (final item in list) {
         final w = WorkoutSession.fromJson(item as Map<String, dynamic>);
-        await db.insert('workouts', {'id': w.id, 'data': jsonEncode(w.toJson())},
-            conflictAlgorithm: ConflictAlgorithm.replace);
+        await db.insert('workouts', {
+          'id': w.id,
+          'data': jsonEncode(w.toJson()),
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
       hasData = true;
     }
@@ -858,14 +987,17 @@ class TemplateStore {
           FOREIGN KEY (session_id) REFERENCES workout_sessions(id) ON DELETE CASCADE
         )
       ''');
-      await db.execute('CREATE INDEX IF NOT EXISTS idx_workout_sets_session ON workout_sets(session_id)');
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_workout_sets_session ON workout_sets(session_id)',
+      );
 
       // migrate old data
       final oldRows = await db.query('workouts');
       for (final row in oldRows) {
         try {
           final w = WorkoutSession.fromJson(
-              jsonDecode(row['data'] as String) as Map<String, dynamic>);
+            jsonDecode(row['data'] as String) as Map<String, dynamic>,
+          );
           await db.insert('workout_sessions', {
             'id': w.id,
             'template_id': w.templateId,
@@ -907,7 +1039,16 @@ class TemplateStore {
 
     // 兼容旧 DB：尝试添加 ai_summary 列（若已存在则静默失败）
     try {
-      await db.execute('ALTER TABLE workout_sessions ADD COLUMN ai_summary TEXT');
+      await db.execute(
+        'ALTER TABLE workout_sessions ADD COLUMN ai_summary TEXT',
+      );
     } catch (_) {}
+    if (oldVersion < 3) {
+      try {
+        await db.execute(
+          'ALTER TABLE workout_sessions ADD COLUMN deleted_at TEXT',
+        );
+      } catch (_) {}
+    }
   }
 }

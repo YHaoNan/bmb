@@ -56,6 +56,17 @@ class _AppShellState extends State<AppShell> {
   int _index = 0;
   final TemplateStore _store = TemplateStore();
   final ValueNotifier<int> _recordsReload = ValueNotifier<int>(0);
+  late final List<Widget> _pages;
+
+  @override
+  void initState() {
+    super.initState();
+    _pages = [
+      const TemplateHomePage(),
+      WorkoutRecordsPage(store: _store, reloadSignal: _recordsReload),
+      ModelConfigPage(store: _store),
+    ];
+  }
 
   @override
   void dispose() {
@@ -65,18 +76,14 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    final pages = [
-      const TemplateHomePage(),
-      WorkoutRecordsPage(store: _store, reloadSignal: _recordsReload),
-      ModelConfigPage(store: _store),
-    ];
     return Scaffold(
-      body: IndexedStack(index: _index, children: pages),
+      body: IndexedStack(index: _index, children: _pages),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (v) {
           setState(() => _index = v);
           if (v == 1) _recordsReload.value++;
+          if (v == 2) TemplateStore.reloadNotifier.value++;
         },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.fitness_center), label: '模板'),
@@ -84,7 +91,7 @@ class _AppShellState extends State<AppShell> {
             icon: Icon(Icons.sports_gymnastics),
             label: '运动记录',
           ),
-          NavigationDestination(icon: Icon(Icons.tune), label: '模型配置'),
+          NavigationDestination(icon: Icon(Icons.tune), label: '设置'),
         ],
       ),
     );
@@ -109,7 +116,16 @@ class _TemplateHomePageState extends State<TemplateHomePage> {
     super.initState();
     reload();
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkActiveWorkout());
+    TemplateStore.reloadNotifier.addListener(_onReload);
   }
+
+  @override
+  void dispose() {
+    TemplateStore.reloadNotifier.removeListener(_onReload);
+    super.dispose();
+  }
+
+  void _onReload() => reload();
 
   Future<void> _checkActiveWorkout() async {
     final saved = await store.loadActiveWorkout();
@@ -130,12 +146,11 @@ class _TemplateHomePageState extends State<TemplateHomePage> {
       await store.clearActiveWorkout();
       return;
     }
-    final tpl = template!;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('恢复训练'),
-        content: Text('检测到未完成的训练「${tpl.name}」，是否继续？'),
+        content: Text('检测到未完成的训练「${template.name}」，是否继续？'),
         actions: [
           TextButton(
             onPressed: () {
@@ -156,7 +171,7 @@ class _TemplateHomePageState extends State<TemplateHomePage> {
         context,
         MaterialPageRoute(
           builder: (_) => WorkoutPage(
-            template: tpl,
+            template: template,
             store: store,
             savedStateJson: saved,
             onSaved: reload,
@@ -274,7 +289,7 @@ class _TemplateHomePageState extends State<TemplateHomePage> {
                       children: [
                         const Expanded(
                           child: Text(
-                            '把今天练什么，变成一套能坚持的模板。',
+                            '练吧你就，兄弟',
                             style: TextStyle(
                               fontSize: 17,
                               fontWeight: FontWeight.w700,
@@ -445,9 +460,18 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
   List<TrainingAction> actions = [];
   String aiSummary = '';
   bool ready = false;
+  bool _showSummary = false;
   late AIPlanService _aiPlanService;
   final Map<int, PageController> _trackControllers = {};
   final Map<int, double> _trackPages = {};
+
+  void _resetActionTrackState() {
+    for (final controller in _trackControllers.values) {
+      controller.dispose();
+    }
+    _trackControllers.clear();
+    _trackPages.clear();
+  }
 
   @override
   void initState() {
@@ -460,9 +484,7 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
 
   @override
   void dispose() {
-    for (final controller in _trackControllers.values) {
-      controller.dispose();
-    }
+    _resetActionTrackState();
     nameController.dispose();
     intentController.dispose();
     super.dispose();
@@ -697,7 +719,11 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
     setState(() {});
   }
 
-  Future<void> generateAiPlan({String extraContext = ''}) async {
+  Future<void> generateAiPlan({
+    String preferParts = '',
+    String dialogAbilities = '',
+    String dialogPreferences = '',
+  }) async {
     if (selectedFolder.isEmpty) {
       toast('请先创建并选择一个文件夹');
       return;
@@ -705,11 +731,23 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
     final templateName = nameController.text.trim().isEmpty
         ? '未命名模板'
         : nameController.text.trim();
-    var intent = intentController.text.trim();
-    if (extraContext.isNotEmpty) intent = '$intent\n\n$extraContext';
+    final intent = intentController.text.trim();
     if (intent.isEmpty) {
       toast('请先填写意图');
       return;
+    }
+
+    // 序列化当前编辑中的模板，优先使用页面上的最新 actions，避免沿用初始 editing 快照
+    final editingTemplate = widget.editing;
+    String currentTemplateJson = '';
+    if (actions.isNotEmpty) {
+      currentTemplateJson = jsonEncode({
+        'folder': selectedFolder,
+        'name': templateName,
+        'actions': actions.map((a) => a.toJson()).toList(),
+      });
+    } else if (editingTemplate != null) {
+      currentTemplateJson = jsonEncode(editingTemplate.toJson());
     }
 
     showDialog<void>(
@@ -718,18 +756,32 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
       builder: (_) => const _AiThinkingAnimation(),
     );
     try {
-      final generated = await _aiPlanService.generatePlan(
+      final result = await _aiPlanService.generatePlan(
         folderName: selectedFolder,
         templateName: templateName,
         intent: intent,
+        preferParts: preferParts,
+        currentTemplateJson: currentTemplateJson,
+        dialogAbilities: dialogAbilities,
+        dialogPreferences: dialogPreferences,
       );
       if (!mounted) return;
       Navigator.of(context).pop();
       setState(() {
-        actions = generated;
+        _resetActionTrackState();
+        // 深拷贝，确保 UI 绑定到全新数据对象，避免旧引用状态残留
+        actions = result.actions
+            .map((a) => TrainingAction.fromJson(a.toJson()))
+            .toList();
+        aiSummary = result.summary;
+        _showSummary = result.summary.isNotEmpty;
       });
       await saveDraft();
-      toast('已生成计划，可继续手动微调');
+      if (result.summary.isNotEmpty) {
+        toast('已生成计划，AI建议：${result.summary}');
+      } else {
+        toast('已生成计划，可继续手动微调');
+      }
     } catch (e, s) {
       debugPrint('[generateAiPlan] ERROR: $e');
       debugPrint('[generateAiPlan] STACK: $s');
@@ -1164,7 +1216,37 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          if (_showSummary && aiSummary.isNotEmpty) ...[
+            Card(
+              color: const Color(0xFF1D2D0F),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(
+                      Icons.auto_awesome,
+                      size: 16,
+                      color: Color(0xFFB7FF00),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        aiSummary,
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => setState(() => _showSummary = false),
+                      icon: const Icon(Icons.close, size: 16),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           const Text(
             '动作组',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
@@ -1256,6 +1338,100 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
     );
   }
 
+  Widget _buildRegionMuscleSelector({
+    required String title,
+    required Set<MuscleGroup> selected,
+    required Set<MuscleGroup> otherSelected,
+    required void Function(VoidCallback fn) setDialogState,
+    required BodyRegion Function() getRegion,
+    required void Function(BodyRegion) setRegion,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 32,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: BodyRegion.values.map((r) {
+              final active = getRegion() == r;
+              return Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: ChoiceChip(
+                  label: Text(
+                    r.displayName,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  selected: active,
+                  onSelected: (_) => setDialogState(() => setRegion(r)),
+                  visualDensity: VisualDensity.compact,
+                  selectedColor: const Color(0xFFB7FF00).withValues(alpha: 0.2),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 4,
+          runSpacing: 4,
+          children: MuscleGroup.values
+              .where((m) => m.region == getRegion())
+              .map(
+                (m) => FilterChip(
+                  label: Text(
+                    m.displayName,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  selected: selected.contains(m),
+                  onSelected: (v) => setDialogState(() {
+                    if (v) {
+                      selected.add(m);
+                      otherSelected.remove(m);
+                    } else
+                      selected.remove(m);
+                  }),
+                  visualDensity: VisualDensity.compact,
+                  selectedColor: const Color(0xFFB7FF00).withValues(alpha: 0.2),
+                ),
+              )
+              .toList(),
+        ),
+        if (selected.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          const Text('已选', style: TextStyle(fontSize: 11, color: Colors.grey)),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            children: selected
+                .map(
+                  (m) => Chip(
+                    label: Text(
+                      m.displayName,
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    deleteIcon: const Icon(Icons.close, size: 14),
+                    onDeleted: () => setDialogState(() => selected.remove(m)),
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    backgroundColor: const Color(
+                      0xFFB7FF00,
+                    ).withValues(alpha: 0.15),
+                  ),
+                )
+                .toList(),
+          ),
+        ],
+      ],
+    );
+  }
+
   Future<void> _editActionDetails(ExerciseCardData card) async {
     final keyPointsController = TextEditingController(
       text: card.keyPoints.join('\n'),
@@ -1265,6 +1441,8 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
     );
     var selectedPrimary = Set<MuscleGroup>.from(card.primaryMuscles);
     var selectedSecondary = Set<MuscleGroup>.from(card.secondaryMuscles);
+    var primaryRegion = BodyRegion.chest;
+    var secondaryRegion = BodyRegion.chest;
 
     final saved = await showDialog<bool>(
       context: context,
@@ -1278,111 +1456,23 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    '主肌群',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                  _buildRegionMuscleSelector(
+                    title: '主肌群',
+                    selected: selectedPrimary,
+                    otherSelected: selectedSecondary,
+                    setDialogState: setDialogState,
+                    getRegion: () => primaryRegion,
+                    setRegion: (r) => primaryRegion = r,
                   ),
-                  const SizedBox(height: 6),
-                  ...BodyRegion.values.map((region) {
-                    final muscles = MuscleGroup.values
-                        .where((m) => m.region == region)
-                        .toList();
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            region.displayName,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Wrap(
-                            spacing: 4,
-                            runSpacing: 4,
-                            children: muscles
-                                .map(
-                                  (m) => FilterChip(
-                                    label: Text(
-                                      m.displayName,
-                                      style: const TextStyle(fontSize: 11),
-                                    ),
-                                    selected: selectedPrimary.contains(m),
-                                    onSelected: (v) => setDialogState(() {
-                                      if (v) {
-                                        selectedPrimary.add(m);
-                                        selectedSecondary.remove(m);
-                                      } else
-                                        selectedPrimary.remove(m);
-                                    }),
-                                    visualDensity: VisualDensity.compact,
-                                    selectedColor: const Color(
-                                      0xFFB7FF00,
-                                    ).withValues(alpha: 0.2),
-                                  ),
-                                )
-                                .toList(),
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
                   const Divider(),
-                  const Text(
-                    '辅助肌群',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                  _buildRegionMuscleSelector(
+                    title: '辅助肌群',
+                    selected: selectedSecondary,
+                    otherSelected: selectedPrimary,
+                    setDialogState: setDialogState,
+                    getRegion: () => secondaryRegion,
+                    setRegion: (r) => secondaryRegion = r,
                   ),
-                  const SizedBox(height: 6),
-                  ...BodyRegion.values.map((region) {
-                    final muscles = MuscleGroup.values
-                        .where((m) => m.region == region)
-                        .toList();
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            region.displayName,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Wrap(
-                            spacing: 4,
-                            runSpacing: 4,
-                            children: muscles
-                                .map(
-                                  (m) => FilterChip(
-                                    label: Text(
-                                      m.displayName,
-                                      style: const TextStyle(fontSize: 11),
-                                    ),
-                                    selected: selectedSecondary.contains(m),
-                                    onSelected: (v) => setDialogState(() {
-                                      if (v) {
-                                        selectedSecondary.add(m);
-                                        selectedPrimary.remove(m);
-                                      } else
-                                        selectedSecondary.remove(m);
-                                    }),
-                                    visualDensity: VisualDensity.compact,
-                                    selectedColor: const Color(
-                                      0xFFB7FF00,
-                                    ).withValues(alpha: 0.2),
-                                  ),
-                                )
-                                .toList(),
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
                   const Divider(),
                   TextField(
                     controller: keyPointsController,
@@ -1441,6 +1531,13 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
   }
 
   Future<void> _showAiGenerateDialog() async {
+    // 预加载基础配置作为默认值
+    final baseConfig = await widget.store.loadModelConfig();
+    final baseExperience = ((baseConfig['userExperience'] as String?) ?? '')
+        .trim();
+    final basePreferTools = ((baseConfig['userPreferTools'] as String?) ?? '')
+        .trim();
+
     final dialogIntentController = TextEditingController(
       text: intentController.text.isEmpty
           ? buildIntent()
@@ -1452,7 +1549,7 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
 
     final bodyParts = BodyRegion.values;
     const abilities = ['菜鸟', '小登', '中登', '老登'];
-    const preferences = ['固定器械', '哑铃', '徒手'];
+    const preferences = ['固定器械', '绳索', '哑铃', '徒手'];
 
     Widget chipRow<T>(
       List<T> items,
@@ -1568,19 +1665,21 @@ class _TemplateEditorPageState extends State<TemplateEditorPage> {
       ),
     );
     if (result == true) {
-      final extraParts = <String>[];
-      if (selectedParts.isNotEmpty) {
-        extraParts.add('训练部位：${selectedParts.join('、')}');
-      }
-      if (selectedAbilities.isNotEmpty) {
-        extraParts.add('健身经验：${selectedAbilities.join('、')}');
-      }
-      if (selectedPreferences.isNotEmpty) {
-        extraParts.add('训练偏好：${selectedPreferences.join('、')}');
-      }
+      // 对话框未选择时使用基础配置默认值
+      final useExperience = selectedAbilities.isNotEmpty
+          ? selectedAbilities.join('、')
+          : (baseExperience.isNotEmpty ? baseExperience : '');
+      final usePreferences = selectedPreferences.isNotEmpty
+          ? selectedPreferences.join('、')
+          : (basePreferTools.isNotEmpty ? basePreferTools : '');
+
       intentController.text = dialogIntentController.text;
       await saveDraft();
-      await generateAiPlan(extraContext: extraParts.join('\n'));
+      await generateAiPlan(
+        preferParts: selectedParts.join('、'),
+        dialogAbilities: useExperience,
+        dialogPreferences: usePreferences,
+      );
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       dialogIntentController.dispose();
